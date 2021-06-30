@@ -1,0 +1,92 @@
+---
+title: "Cleaning and data processing/ feature engineering"
+author: "JJayes"
+date: "29/06/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+# library(reticulate)
+```
+
+
+
+Getting subtitles using python
+
+```{r}
+# version <- "3.7.4"
+# # install_python(version = version)
+# virtualenv_create("my-environment", python_version = version)
+# use_virtualenv("my-environment", required = TRUE)
+# 
+# # installing the package needed for getting the transcripts
+# virtualenv_install("my-environment", "youtube_transcript_api")
+
+```
+
+Things to get from video description.
+
+Could maybe do these in a recipe so that I can deploy it via Github Actions and do a CI thing. Would be a fun way to learn recipes. Maybe not the most stable though and relies on the fact that he will continue to structure his descriptions in such a way that I can extract the information methodologically. 
+
+- score
+- statistics (views, comments, etc.)
+- date
+- genre
+- record company
+- duration
+
+```{r}
+tbl <- read_rds("data/album_reviews_raw.rds")
+
+tbl %>% skimr::skim()
+
+```
+
+
+
+### EDA
+
+```{r}
+tbl <- tbl %>% 
+    mutate(score_raw = str_extract(snippet.description, "[0-9]/10 |CLASSIC|NOT GOOD"),
+           score = parse_number(score_raw)) 
+
+tbl %>% 
+    select(score, score_raw) %>% 
+    arrange(score)
+
+tbl %>% 
+    ggplot(aes(score)) +
+    geom_histogram()
+```
+
+Statistics
+
+```{r}
+tbl <- tbl %>% 
+    mutate(across(starts_with("statistics"), as.numeric))
+
+tbl %>% 
+    ggplot(aes(statistics.viewCount)) +
+    geom_density()
+
+```
+
+Date
+
+```{r}
+tbl <- tbl %>% 
+    mutate(published_date = lubridate::date(snippet.publishedAt))
+```
+
+Duration
+
+```{r}
+tbl <- tbl %>%
+    mutate(duration = lubridate::duration(contentDetails.duration)) 
+
+```
+

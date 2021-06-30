@@ -1,0 +1,272 @@
+---
+title: "Website Scraper"
+author: "JJayes"
+date: "29/06/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(rvest)
+library(glue)
+
+library(httr)
+library(jsonlite)
+
+```
+
+## Purpose
+
+Query API for Youtube to get the captions and the descriptions from the Needle Drop album reviews.
+
+We need to get a list of all of the uploads.
+
+Then we need to filter these to get only the album reviews.
+
+```{r}
+key <- "AIzaSyBHGmTJ2uLeMsIjBUN3jN7G3RSjozkaq8k"
+
+user_id <- "theneedledrop"  # Username
+base <- "https://www.googleapis.com/youtube/v3/"
+
+```
+
+
+
+```{r}
+# Construct the API call
+api_params <- 
+  paste(paste0("key=", key), 
+        paste0("forUsername=", user_id), 
+        "part=snippet,contentDetails,statistics",
+        sep = "&")
+
+api_call <- paste0(base, "channels", "?", api_params)
+api_result <- GET(api_call)
+json_result <- content(api_result, "text", encoding="UTF-8")
+```
+
+```{r}
+# Process the raw data into a data frame
+channel.json <- fromJSON(json_result, flatten = T)
+channel.df <- channel.json$items %>% as_tibble()
+
+# get playlist id for uploads
+channel.df %>% 
+    select(contentDetails.relatedPlaylists.uploads)
+
+playlist_id <- channel.df %>% 
+    select(contentDetails.relatedPlaylists.uploads) %>% as.character()
+
+```
+
+
+Get all videos from uploads, call it upload.df.
+
+```{r}
+# temporary variables
+nextPageToken <- ""
+upload.df <- NULL
+pageInfo <- NULL
+# Loop through the playlist while there is still a next page
+while (!is.null(nextPageToken)) {
+  # Construct the API call
+  api_params <- 
+    paste(paste0("key=", key), 
+          paste0("playlistId=", playlist_id), 
+          "part=snippet,contentDetails,status",
+          "maxResults=50",
+          sep = "&")
+  
+  # Add the page token for page 2 onwards
+  if (nextPageToken != "") {
+    api_params <- paste0(api_params,
+                         "&pageToken=",nextPageToken)
+  }
+  
+  api_call <- paste0(base, "playlistItems", "?", api_params)
+  api_result <- GET(api_call)
+  json_result <- content(api_result, "text", encoding="UTF-8")
+  upload.json <- fromJSON(json_result, flatten = T)
+  
+  nextPageToken <- upload.json$nextPageToken
+  pageInfo <- upload.json$pageInfo
+  
+  curr.df <- as.data.frame(upload.json$items)
+  if (is.null(upload.df)) {
+    upload.df <- curr.df
+  } else {
+    upload.df <- bind_rows(upload.df, curr.df)
+  }
+}
+
+upload_tbl <- upload.df %>% as_tibble()
+
+upload_tbl %>% head() %>% view()
+```
+
+Get statistics about each video
+
+```{r}
+video.df<- NULL
+# Loop through all uploaded videos
+for (i in 1:nrow(upload.df)) {
+  # Construct the API call
+  video_id <- upload.df$contentDetails.videoId[i]
+  api_params <- 
+    paste(paste0("key=", key), 
+          paste0("id=", video_id), 
+          "part=id,statistics,contentDetails",
+          sep = "&")
+  
+  api_call <- paste0(base, "videos", "?", api_params)
+  api_result <- GET(api_call)
+  json_result <- content(api_result, "text", encoding="UTF-8")
+  video.json <- fromJSON(json_result, flatten = T)
+  
+  curr.df <- as.data.frame(video.json$items)
+  
+  if (is.null(video.df)) {
+    video.df <- curr.df
+  } else {
+    video.df <- bind_rows(video.df, curr.df)
+  }
+}  
+
+
+video_tbl <- video.df %>% as_tibble()
+
+video.df
+
+video_tbl %>% head() %>% view()
+
+tbl <- upload_tbl %>% left_join(video_tbl, by = "id")
+
+tbl %>% filter(snippet.title == "The Magnetic Fields - 50 Song Memoir ALBUM REVIEW") %>% select(id)
+
+# write_rds(tbl, "data/raw_data_from_yt.rds")
+```
+
+
+Trying to get captions
+
+```{r}
+# Construct the API call
+id <- "VVV0N2Z3QWhYRHkzb05GVEF6RjJvOFB3LktGR28zU1dPbEtv"
+
+api_params <- 
+  paste("onBehalfOf=j0nathanjayes%40gmail.com",
+        paste0("key=", key), 
+        sep = "&")
+
+api_call <- paste0(base, "captions/", id, "?", api_params)
+api_result <- GET(api_call)
+json_result <- content(api_result, "text", encoding="UTF-8")
+```
+
+```{r}
+# Process the raw data into a data frame
+channel.json <- fromJSON(json_result, flatten = T)
+channel.df <- channel.json$items %>% as_tibble()
+```
+
+
+
+
+
+
+Rewriting the function to get the data about each video
+
+```{r}
+# Loop through all uploaded videos
+for (i in 1:nrow(upload.df)) {
+  # Construct the API call
+  video_id <- upload.df$contentDetails.videoId[i]
+  api_params <- 
+    paste(paste0("key=", key), 
+          paste0("id=", video_id), 
+          "part=id,statistics,contentDetails",
+          sep = "&")
+  
+  api_call <- paste0(base, "videos", "?", api_params)
+  api_result <- GET(api_call)
+  json_result <- content(api_result, "text", encoding="UTF-8")
+  video.json <- fromJSON(json_result, flatten = T)
+  
+  curr.df <- as.data.frame(video.json$items)
+  
+  if (is.null(video.df)) {
+    video.df <- curr.df
+  } else {
+    video.df <- bind_rows(video.df, curr.df)
+  }
+}
+```
+
+
+```{r}
+tbl <- tbl %>%
+  mutate(video_id = str_remove(snippet.thumbnails.default.url, "https://i.ytimg.com/vi/"),
+         video_id = str_remove(video_id, "/default.jpg"))
+
+tbl %>% 
+  select(video_id)
+```
+
+
+```{r}
+video_id <- "6kWWLOampOM"
+
+get_video_data <- function(video_id){
+  
+  base <- "https://www.googleapis.com/youtube/v3/"
+  
+  key <- "AIzaSyBHGmTJ2uLeMsIjBUN3jN7G3RSjozkaq8k"
+  
+  part <- "part=id,statistics,contentDetails,snippet"
+  
+  api_call <- 
+    glue::glue(base,
+         "videos?",
+         part,
+         "&",
+         "id=",
+         video_id,
+         "&",
+         "key=",key)
+
+  api_result <- httr::GET(api_call)
+  
+  json_result <- httr::content(api_result, "text", encoding="UTF-8")
+  
+  json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
+  
+  results <- json_result_flat$items
+  
+  results %>% dplyr::as_tibble()
+  
+}
+
+get_video_stats("6kWWLOampOM")
+```
+
+
+```{r}
+
+list_of_album_reviews <- tbl %>% 
+  select(video_id, snippet.title) %>% 
+  filter(str_detect(snippet.title, "ALBUM REVIEW"))
+
+album_reviews <- list_of_album_reviews %>% 
+  mutate(video_data = map(video_id, get_video_data))
+
+album_reviews <- album_reviews %>% 
+  select(-snippet.title) %>% 
+  unnest(video_data)
+
+write_rds(album_reviews, "data/album_reviews_raw.rds")
+
+```
+
