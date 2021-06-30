@@ -51,16 +51,21 @@ tbl %>% skimr::skim()
 
 ```{r}
 tbl <- tbl %>% 
-    mutate(score_raw = str_extract(snippet.description, "[0-9]/10 |CLASSIC|NOT GOOD"),
+    mutate(score_raw = str_extract(snippet.description, "[0-9]/10|10/10|CLASSIC"),
            score = parse_number(score_raw)) 
 
 tbl %>% 
     select(score, score_raw) %>% 
-    arrange(score)
+    arrange(desc(score))
+
+tbl %>% 
+    select(score, score_raw, snippet.description) %>% 
+    arrange((score))
 
 tbl %>% 
     ggplot(aes(score)) +
     geom_histogram()
+
 ```
 
 Statistics
@@ -80,6 +85,24 @@ Date
 ```{r}
 tbl <- tbl %>% 
     mutate(published_date = lubridate::date(snippet.publishedAt))
+
+tbl %>% 
+    ggplot(aes(published_date, score)) +
+    geom_jitter() +
+    geom_smooth(method = "lm")
+
+tbl %>% 
+    ggplot(aes(published_date, statistics.viewCount)) +
+    geom_point() +
+    geom_smooth() +
+    scale_y_log10(labels = scales::number_format())
+
+tbl %>% 
+    ggplot(aes(published_date, statistics.commentCount)) +
+    geom_point() +
+    geom_smooth() +
+    scale_y_log10(labels = scales::number_format())
+
 ```
 
 Duration
@@ -87,6 +110,23 @@ Duration
 ```{r}
 tbl <- tbl %>%
     mutate(duration = lubridate::duration(contentDetails.duration)) 
+
+tbl %>% 
+    ggplot(aes(published_date, duration)) +
+    geom_point() +
+    geom_smooth()
+
+tbl %>% 
+    arrange(desc(duration)) %>% head() %>% view()
+
+```
+
+Tags
+
+```{r}
+tbl %>% 
+    select(snippet.tags) %>% 
+    mutate(tags = paste(unlist(snippet.tags), collapse = ";"))
 
 ```
 

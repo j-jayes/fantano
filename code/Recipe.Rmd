@@ -1,0 +1,71 @@
+---
+title: "Recipe"
+author: "JJayes"
+date: "30/06/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidymodels)
+```
+
+## Purpose
+
+Pre-processing recipe to prepare the data for modelling. This is done after a bit of ad hoc analysis.
+
+### Reading in data
+
+```{r}
+tbl <- read_rds("data/album_reviews_raw.rds")
+
+tbl <- tbl %>% 
+    select(video_id,
+           snippet.title,
+           snippet.publishedAt,
+           snippet.description,
+           contentDetails.duration,
+           contentDetails.caption,
+           starts_with("statistics"),
+           snippet.tags
+           ) %>% 
+    mutate(tags = paste(unlist(snippet.tags), collapse = ";"), # Have to do this for the recipe below...
+           score = 0) %>% 
+    select(-snippet.tags)
+
+```
+
+### Recipe for cleaning
+
+Note sure if its best to do this with a recipe or just with dplyr?
+
+```{r}
+cleaning_rec <- recipe(score ~ ., data = tbl) %>% 
+    update_role(video_id, new_role = "id") %>% 
+    step_factor2string(snippet.publishedAt, contentDetails.duration) %>% 
+    step_mutate(score_raw = str_extract(snippet.description, "[0-9]/10|10/10|CLASSIC"),
+                score = parse_number(score_raw),
+                published_date = lubridate::date(snippet.publishedAt),
+                duration = lubridate::duration(contentDetails.duration)) %>% 
+    step_mutate_at(starts_with("statistics"), fn = ~ as.numeric(.)) %>% 
+    step_rm(snippet.publishedAt, contentDetails.duration)
+
+
+
+juiced_data <- cleaning_rec %>% prep() %>% juice()
+
+df <- juiced_data
+
+df
+```
+
+### Recipe for modelling
+
+```{r}
+basic_rec <- recipe(score ~ ., data = df) %>% 
+    step_date(published_date, c("week", "dow", "month", "year"))
+
+```
+
