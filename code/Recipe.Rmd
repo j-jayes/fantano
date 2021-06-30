@@ -45,7 +45,7 @@ Note sure if its best to do this with a recipe or just with dplyr?
 cleaning_rec <- recipe(score ~ ., data = tbl) %>% 
     update_role(video_id, new_role = "id") %>% 
     step_factor2string(snippet.publishedAt, contentDetails.duration) %>% 
-    step_mutate(score_raw = str_extract(snippet.description, "[0-9]/10|10/10|CLASSIC"),
+    step_mutate(score_raw = str_extract(snippet.description, "\n[0-9]/10|\n10/10|CLASSIC"),
                 score = parse_number(score_raw),
                 published_date = lubridate::date(snippet.publishedAt),
                 duration = lubridate::duration(contentDetails.duration)) %>% 
@@ -58,7 +58,8 @@ juiced_data <- cleaning_rec %>% prep() %>% juice()
 
 df <- juiced_data
 
-df
+df %>% select(tags) %>% 
+    separate_rows(tags, sep = ";")
 ```
 
 ### Recipe for modelling
@@ -66,6 +67,11 @@ df
 ```{r}
 basic_rec <- recipe(score ~ ., data = df) %>% 
     step_date(published_date, c("week", "dow", "month", "year"))
+
+df %>% 
+    ggplot(aes(statistics.commentCount, score)) +
+    geom_jitter() +
+    geom_smooth()
 
 ```
 

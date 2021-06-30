@@ -51,8 +51,12 @@ tbl %>% skimr::skim()
 
 ```{r}
 tbl <- tbl %>% 
-    mutate(score_raw = str_extract(snippet.description, "[0-9]/10|10/10|CLASSIC"),
+    # the \n before it is to correct for the song called 10/10 by Rex Orange County
+    mutate(score_raw = str_extract(snippet.description, "\n[0-9]/10|\n10/10|CLASSIC"),
            score = parse_number(score_raw)) 
+
+tbl %>% 
+    count(score_raw, sort = T)
 
 tbl %>% 
     select(score, score_raw) %>% 
@@ -65,6 +69,12 @@ tbl %>%
 tbl %>% 
     ggplot(aes(score)) +
     geom_histogram()
+
+tbl %>% filter(score == 10) %>% pull(snippet.description)
+
+tbl %>% 
+    filter(snippet.title == "Rex Orange County - Pony ALBUM REVIEW") %>% 
+    select(snippet.description) %>% view()
 
 ```
 
@@ -127,6 +137,12 @@ Tags
 tbl %>% 
     select(snippet.tags) %>% 
     mutate(tags = paste(unlist(snippet.tags), collapse = ";"))
+
+review_list <- tbl %>%
+    filter(contentDetails.caption == "true") %>% 
+    select(video_id)
+
+review_list %>% write.csv(., file = "data/video_ids.csv", row.names = F)
 
 ```
 
