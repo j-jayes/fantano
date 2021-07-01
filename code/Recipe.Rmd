@@ -19,7 +19,7 @@ Pre-processing recipe to prepare the data for modelling. This is done after a bi
 ### Reading in data
 
 ```{r}
-tbl <- read_rds("data/album_reviews_raw.rds")
+tbl <- read_rds("data/transcripts_filtered_and_data.rds")
 
 tbl <- tbl %>% 
     select(video_id,
@@ -27,14 +27,26 @@ tbl <- tbl %>%
            snippet.publishedAt,
            snippet.description,
            contentDetails.duration,
-           contentDetails.caption,
            starts_with("statistics"),
-           snippet.tags
+           snippet.tags,
+           text
            ) %>% 
-    mutate(tags = paste(unlist(snippet.tags), collapse = ";"), # Have to do this for the recipe below...
+    mutate(tags = paste(unlist(snippet.tags), 
+                        collapse = ";"), # Have to do this for the recipe below...
            score = 0) %>% 
-    select(-snippet.tags)
+    select(-snippet.tags,
+           statistics.favoriteCount)
+```
 
+Some reviews (176) didn't get captions from the captions API. 
+
+```{r}
+tbl %>%
+    count(text, sort = T)
+    
+tbl <- tbl %>%
+    mutate(text = str_remove(text, "A n e x c e p t i o n o c c u r r e d"),
+           text = na_if(text, ""))
 ```
 
 ### Recipe for cleaning
@@ -50,7 +62,9 @@ cleaning_rec <- recipe(score ~ ., data = tbl) %>%
                 published_date = lubridate::date(snippet.publishedAt),
                 duration = lubridate::duration(contentDetails.duration)) %>% 
     step_mutate_at(starts_with("statistics"), fn = ~ as.numeric(.)) %>% 
-    step_rm(snippet.publishedAt, contentDetails.duration)
+    step_rm(snippet.publishedAt, contentDetails.duration) %>% 
+    # missing y values are a problem. We will remove the ones we don't have scores for, and the ones which are rated "CLASSIC".
+    step_filter(!is.na(score))
 
 
 
@@ -58,20 +72,88 @@ juiced_data <- cleaning_rec %>% prep() %>% juice()
 
 df <- juiced_data
 
-df %>% select(tags) %>% 
-    separate_rows(tags, sep = ";")
+df <- df %>% 
+    janitor::clean_names()
+
+# write_rds(df, "data/clean_data_with_transcripts.rds")
 ```
 
 ### Recipe for modelling
 
 ```{r}
-basic_rec <- recipe(score ~ ., data = df) %>% 
-    step_date(published_date, c("week", "dow", "month", "year"))
+library(textrecipes)
 
-df %>% 
-    ggplot(aes(statistics.commentCount, score)) +
-    geom_jitter() +
-    geom_smooth()
+small_sample <- df %>% sample_n(100)
 
+skimr::skim(small_sample)
+
+basic_rec <- recipe(score ~ ., data = small_sample) %>% 
+    # update role for ids
+    update_role(video_id, 
+                snippet_title, 
+                snippet_description, 
+                score_raw, 
+                new_role =  "id") %>% 
+    # make the tags and text tokens at the word level.
+    step_tokenize(text) %>% 
+    # remove stopwords
+    step_stopwords(text) %>% 
+    step_tokenize(tags, token = "regex", options = list(";")) %>% 
+    # we'll tune these later
+    step_tokenfilter(tags, max_tokens = 20) %>% 
+    # we'll tune these later
+    step_tokenfilter(text, max_tokens = 200) %>% 
+    step_tf(text, tags) %>% 
+    # making duration into seconds rather than 
+    step_mutate(duration = as.numeric(duration)) %>% 
+    step_nzv(all_numeric_predictors()) %>% 
+    # normalize the numeric predictors
+    step_normalize(all_numeric_predictors()) %>% 
+    # make date
+    step_date(published_date, 
+              # make lots of features just to see
+              features = c("week", "dow", "month", "year"),
+              keep_original_cols = F) %>% 
+    step_dummy(all_nominal_predictors())
+
+# juiced_basic <- basic_rec %>% 
+#     prep() %>% 
+#     juice()
+# 
+# juiced_basic %>% head() %>% view()
+
+```
+
+Prep for modelling
+
+```{r}
+spl <- initial_split(small_sample)
+
+train <- training(spl)
+test <- testing(spl)
+
+folds <- vfold_cv(train, 5)
+
+```
+
+### Start with a bagged tree model
+
+```{r}
+library(baguette)
+
+bag_spec <- bag_tree() %>% 
+  set_engine("rpart", times = 25) %>% # 25 ensemble members 
+  set_mode("regression")
+
+
+bag_wf <- workflow() %>% 
+    add_recipe(basic_rec) %>% 
+    add_model(bag_spec)
+
+set.seed(123)
+bag_cars <- bag_wf %>% 
+    fit(data = small_sample)
+
+bag_cars
 ```
 

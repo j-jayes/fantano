@@ -142,7 +142,156 @@ review_list <- tbl %>%
     filter(contentDetails.caption == "true") %>% 
     select(video_id)
 
-review_list %>% write.csv(., file = "data/video_ids.csv", row.names = F)
+# review_list %>% write.csv(., file = "data/video_ids.csv", row.names = F)
+
+```
+
+### Transcipts
+
+testing with the small data set
+
+```{r}
+ts <- read.csv("data/test_2.csv")
+
+ts <- ts %>% as_tibble()
+
+ts %>% 
+    pull(X0, X1)
+
+ts <- ts %>% 
+    select(-X) %>% 
+    mutate(across(starts_with("X"), ~ str_remove(.x, "\\{\\'text\\':")),
+           across(starts_with("X"), ~ str_remove(.x, ", \\'start':.*")),
+           # now to remove the opening quote '
+           across(starts_with("X"), ~ str_remove(.x, "^ '")),
+           # to remove ending quote '
+           across(starts_with("X"), ~ str_remove(.x, "'$")),
+           # now to remove the opening double quote "
+           across(starts_with("X"), ~ str_remove(.x, "^ \\\"")),
+            # to remove ending double quote "
+           across(starts_with("X"), ~ str_remove(.x, "\\\"$"))) %>% 
+    unite(text, starts_with("X"), sep = " ") %>% 
+    mutate(text = str_squish(text),
+           text = str_remove_all(text, "\\\""),
+           text = str_remove_all(text, "NA"),
+           text = str_squish(text))
+
+
+```
+
+Big data set!
+
+```{r}
+ts <- read_csv("data/transcripts_from_album_reviews.csv")
+
+ts <- ts %>% as_tibble()
+
+ts <- ts %>% 
+    select(-A) %>% 
+    mutate(across(starts_with("X"), ~ str_remove(.x, "\\{\\'text\\':")),
+           across(starts_with("X"), ~ str_remove(.x, ", \\'start':.*")),
+           # now to remove the opening quote '
+           across(starts_with("X"), ~ str_remove(.x, "^ '")),
+           # to remove ending quote '
+           across(starts_with("X"), ~ str_remove(.x, "'$")),
+           # now to remove the opening double quote "
+           across(starts_with("X"), ~ str_remove(.x, "^ \\\"")),
+            # to remove ending double quote "
+           across(starts_with("X"), ~ str_remove(.x, "\\\"$"))) %>% 
+    unite(text, starts_with("X"), sep = " ") %>% 
+    mutate(text = str_squish(text),
+           text = str_remove_all(text, "\\\""),
+           text = str_remove_all(text, "NA"),
+           text = str_squish(text))
+
+tbl_2 <- tbl %>% bind_cols(ts)
+
+tbl_2 %>% 
+    select(text)
+
+# write_rds(tbl_2, "data/transcripts_filtered_and_data.rds")
+
+```
+
+
+```{r}
+library(tidytext)
+
+words <- tbl_2 %>% 
+    unnest_tokens(word, text) %>% 
+    select(video_id, snippet.title, word)
+
+
+words <- words %>% 
+    anti_join(stop_words) 
+
+words %>% 
+    count(word, sort = T) %>% 
+    head(100) %>% view()
+```
+
+Effect of week?
+
+```{r}
+df %>% 
+    mutate(week = week(published_date),
+           year = year(published_date)) %>%
+    group_by(week) %>% 
+    mutate(mean_score = mean(score, na.rm = T)) %>%
+    ggplot(aes(week, mean_score)) +
+    geom_point() +
+    geom_line() +
+    geom_smooth()
+
+df %>% 
+    mutate(week = week(published_date),
+           year = year(published_date)) %>%
+    group_by(week) %>% 
+    ggplot(aes(week, score, group = week)) +
+    geom_boxplot()
+
+df %>% 
+    mutate(week = week(published_date),
+           year = year(published_date)) %>%
+    group_by(week) %>% 
+    ggplot(aes(week, score)) +
+    geom_jitter() +
+    geom_smooth()
+
+df %>% 
+    mutate(dow = lubridate::day(published_date),
+           year = year(published_date)) %>%
+    group_by(dow) %>% 
+    ggplot(aes(dow, score)) +
+    geom_jitter() +
+    geom_smooth()
+```
+
+Can easily make this into a ridge-line plot
+
+```{r}
+df %>% 
+    mutate(dow = lubridate::wday(published_date, label = T),
+           year = year(published_date)) %>%
+    group_by(dow) %>% 
+    ggplot(aes(dow, score, group = dow)) +
+    geom_boxplot() 
+
+df %>% 
+    mutate(dow = lubridate::wday(published_date, label = T),
+           year = year(published_date)) %>%
+    group_by(dow) %>% 
+    ggplot(aes(score)) +
+    geom_density() +
+    facet_wrap(~ dow)
+
+df %>% 
+    mutate(dow = lubridate::wday(published_date, label = TRUE),
+           year = year(published_date)) %>%
+    count(dow) %>% 
+    mutate(dow = fct_rev(dow)) %>% 
+    ggplot(aes(n, dow, fill = dow)) +
+    geom_col()
 
 ```
 

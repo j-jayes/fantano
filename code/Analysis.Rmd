@@ -1,0 +1,94 @@
+---
+title: "Analysis"
+author: "JJayes"
+date: "01/07/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Purpose
+
+EDA and modelling for Needle Drop Dataset.
+
+### Recipe for modelling
+
+```{r}
+library(textrecipes)
+
+small_sample <- df %>% sample_n(100)
+
+skimr::skim(small_sample)
+
+basic_rec <- recipe(score ~ ., data = small_sample) %>% 
+    # update role for ids
+    update_role(video_id, 
+                snippet_title, 
+                snippet_description, 
+                score_raw, 
+                new_role =  "id") %>% 
+    # make the tags and text tokens at the word level.
+    step_tokenize(text) %>% 
+    # remove stopwords
+    step_stopwords(text) %>% 
+    step_tokenize(tags, token = "regex", options = list(";")) %>% 
+    # we'll tune these later
+    step_tokenfilter(tags, max_tokens = 20) %>% 
+    # we'll tune these later
+    step_tokenfilter(text, max_tokens = 200) %>% 
+    step_tf(text, tags) %>% 
+    # making duration into seconds rather than 
+    step_mutate(duration = as.numeric(duration)) %>% 
+    step_nzv(all_numeric_predictors()) %>% 
+    # normalize the numeric predictors
+    step_normalize(all_numeric_predictors()) %>% 
+    # make date
+    step_date(published_date, 
+              # make lots of features just to see
+              features = c("week", "dow", "month", "year"),
+              keep_original_cols = F) %>% 
+    step_dummy(all_nominal_predictors())
+
+# juiced_basic <- basic_rec %>% 
+#     prep() %>% 
+#     juice()
+# 
+# juiced_basic %>% head() %>% view()
+
+```
+
+Prep for modelling
+
+```{r}
+spl <- initial_split(small_sample)
+
+train <- training(spl)
+test <- testing(spl)
+
+folds <- vfold_cv(train, 5)
+
+```
+
+### Start with a bagged tree model
+
+```{r}
+library(baguette)
+
+bag_spec <- bag_tree() %>% 
+  set_engine("rpart", times = 25) %>% # 25 ensemble members 
+  set_mode("regression")
+
+
+bag_wf <- workflow() %>% 
+    add_recipe(basic_rec) %>% 
+    add_model(bag_spec)
+
+set.seed(123)
+bag_cars <- bag_wf %>% 
+    fit(data = small_sample)
+
+bag_cars
+```
+
