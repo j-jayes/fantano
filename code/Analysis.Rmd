@@ -7,22 +7,161 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidymodels)
+library(lubridate)
+library(glue)
 ```
 
 ## Purpose
 
-EDA and modelling for Needle Drop Dataset.
+EDA and modelling for Needle Drop Dataset to predict score from words
+
+### Reading in data
+
+```{r}
+df <- read_rds("data/clean_data_with_transcripts.rds")
+
+df <- df %>% 
+  select(-statistics_favorite_count)
+```
+
+## EDA
+
+What does the data look like?
+
+```{r}
+df %>% skimr::skim()
+```
+
+### How does Fantano score albums?
+
+```{r}
+df %>% 
+  count(score) %>% 
+  ggplot(aes(score, n)) +
+  geom_col(fill = "lightblue") + # Come back to colours
+  labs(x = "Album score by Fantano",
+       y = "Number of albums")
+```
+
+
+### Scores over time?
+
+```{r}
+library(plotly)
+
+g <- df %>% 
+  mutate(title = str_remove(snippet_title, "ALBUM REVIEW")) %>% 
+    ggplot(aes(published_date, score, text = glue("{title} - {score}"))) +
+    geom_jitter(aes(colour = score),
+                width = 0, height = .6, show.legend = FALSE) +
+    geom_smooth(method = "lm") +
+    labs(y = "Album score",
+         x = "Review date")
+
+ggplotly(g, tooltip = "text")
+
+```
+
+With ggiraph
+
+```{r}
+library(plotly)
+
+g <- df %>% 
+  mutate(title = str_remove(snippet_title, "ALBUM REVIEW")) %>% 
+    ggplot(aes(published_date, score, text = glue("{title} - {score}"))) +
+    geom_jitter(aes(colour = score),
+                width = 0, height = .6, show.legend = FALSE) +
+    geom_smooth(method = "lm") +
+    labs(y = "Album score",
+         x = "Review date")
+
+ggplotly(g, tooltip = "text")
+
+```
+
+
+### Scores and video statistics?
+
+```{r}
+df %>% 
+  select(score, starts_with("statistics")) %>% 
+  pivot_longer(-score, names_to = "stat") %>% 
+  mutate(stat = str_replace_all(stat, "_", " "),
+         stat = str_to_title(stat)) %>% 
+  ggplot(aes(value, score)) +
+  geom_jitter(alpha = .5,
+              height = .8) +
+  geom_smooth() +
+  scale_x_log10(labels = scales::number_format()) +
+  facet_wrap(~ stat, scales = "free_x")
+```
+
+What can we say about this?
+
+As people comment more and dislike the video, the scores get lower, potentially indicative of anger at Fantano scoring the albums lower than his viewers would have liked.
+
+We can also make a linear model and display the results as a tie-fighter plot. This shows that when we log the statistic, comment count and dislike count are negatively associated with the score.
+
+```{r}
+df %>% 
+  select(score, starts_with("statistics")) %>% 
+  pivot_longer(-score, names_to = "stat") %>% 
+  mutate(stat = str_replace_all(stat, "_", " "),
+         stat = str_to_title(stat),
+         value = log(value)) %>% 
+  nest(data = -stat) %>% 
+  mutate(
+    fit = map(data, ~ lm(score ~ value, data = .x)),
+    tidied = map(fit, ~ tidy(.x, conf.int = T))
+  ) %>% 
+  unnest(tidied) %>% 
+  filter(term != "(Intercept)") %>% 
+  ggplot(aes(estimate, stat)) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  geom_vline(xintercept = 0, lty = 2) +
+  labs(x = "Effect of log of term on score",
+       y = NULL,
+       title = "What is the correlation between view statistics and album score?")
+
+```
+
+### Tags
+
+```{r}
+tags <- df %>% 
+    select(tags, score) %>% 
+    separate_rows(tags, sep = ";")
+
+```
 
 ### Recipe for modelling
+
+Prep for modelling
+
+```{r}
+small_sample <- df %>% sample_n(500)
+
+skimr::skim(small_sample)
+
+spl <- initial_split(small_sample)
+
+train <- training(spl)
+test <- testing(spl)
+
+folds <- vfold_cv(train, 5)
+
+```
+
 
 ```{r}
 library(textrecipes)
 
-small_sample <- df %>% sample_n(100)
-
-skimr::skim(small_sample)
-
-basic_rec <- recipe(score ~ ., data = small_sample) %>% 
+basic_rec <- recipe(score ~ ., data = train) %>% 
     # update role for ids
     update_role(video_id, 
                 snippet_title, 
@@ -41,53 +180,108 @@ basic_rec <- recipe(score ~ ., data = small_sample) %>%
     step_tf(text, tags) %>% 
     # making duration into seconds rather than 
     step_mutate(duration = as.numeric(duration)) %>% 
-    step_nzv(all_numeric_predictors()) %>% 
-    # normalize the numeric predictors
-    step_normalize(all_numeric_predictors()) %>% 
     # make date
     step_date(published_date, 
               # make lots of features just to see
               features = c("week", "dow", "month", "year"),
-              keep_original_cols = F) %>% 
-    step_dummy(all_nominal_predictors())
-
-# juiced_basic <- basic_rec %>% 
-#     prep() %>% 
-#     juice()
-# 
-# juiced_basic %>% head() %>% view()
+              keep_original_cols = F)
 
 ```
 
-Prep for modelling
+
+### Start with a logistic regression model
 
 ```{r}
-spl <- initial_split(small_sample)
+library(usemodels)
+usemodels::use_glmnet(formula = score ~ ., data = train)
 
-train <- training(spl)
-test <- testing(spl)
+glmnet_recipe <- 
+  basic_rec %>% 
+  step_novel(all_nominal_predictors()) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_nzv(all_predictors()) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  step_mutate(score = as.numeric(score))
 
-folds <- vfold_cv(train, 5)
+glmnet_recipe %>% prep() %>% juice()
 
+glmnet_spec <- 
+  linear_reg(penalty = tune(),
+             mixture = 1) %>% 
+  set_mode("regression") %>% 
+  set_engine("glmnet") 
+
+glmnet_workflow <- 
+  workflow() %>% 
+  add_recipe(glmnet_recipe) %>% 
+  add_model(glmnet_spec) 
+
+glmnet_grid <- tidyr::crossing(penalty = 10^seq(-6, -1, length.out = 10)) 
+
+glmnet_tune <- 
+  tune_grid(glmnet_workflow, resamples = folds, grid = glmnet_grid)
+
+glmnet_tune %>% 
+  autoplot()
+
+glmnet_tune %>% 
+  collect_metrics()
+
+glmnet_tune %>% 
+  select_best(metric = "rsq")
+
+glmnet_workflow_final <- glmnet_workflow %>% 
+  finalize_workflow(parameters = select_best(glmnet_tune, metric = "rsq"))
+
+final_fit <- glmnet_workflow_final %>% 
+  last_fit(spl)
+
+glm_fit <- glmnet_workflow_final %>% 
+  fit(test)
+
+fit <- glm_fit %>% pull_workflow_fit()
+
+fit$fit$beta %>% 
+  tidy() %>% 
+  mutate(col = parse_number(column),
+         abs_value = abs(value)) %>% 
+  filter(col == max(col)) %>%
+  slice_max(abs_value, n = 50, with_ties = F) %>% 
+  mutate(row = fct_reorder(row, value)) %>% 
+  ggplot(aes(value, row)) +
+  geom_col() +
+  geom_vline(xintercept = 0, lty = 2)
+
+final_fit %>% 
+  collect_metrics()
 ```
 
-### Start with a bagged tree model
+### Next let's go with a bagged tree model
 
 ```{r}
 library(baguette)
 
+bag_recipe <- 
+  basic_rec %>% 
+  step_novel(all_nominal_predictors()) %>% 
+  step_dummy(all_nominal_predictors()) %>% 
+  step_nzv(all_predictors()) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  step_mutate(score = as.numeric(score))
+
+
 bag_spec <- bag_tree() %>% 
-  set_engine("rpart", times = 25) %>% # 25 ensemble members 
+  set_engine("rpart") %>% # 25 ensemble members 
   set_mode("regression")
 
 
 bag_wf <- workflow() %>% 
-    add_recipe(basic_rec) %>% 
+    add_recipe(bag_recipe) %>% 
     add_model(bag_spec)
 
 set.seed(123)
 bag_cars <- bag_wf %>% 
-    fit(data = small_sample)
+    fit_resamples(resamples = folds)
 
 bag_cars
 ```
