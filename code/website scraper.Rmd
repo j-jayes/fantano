@@ -9,7 +9,6 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)
-library(rvest)
 library(glue)
 
 library(httr)
@@ -245,15 +244,30 @@ get_video_data <- function(video_id){
   
   results <- json_result_flat$items
   
-  results %>% dplyr::as_tibble()
+  tags <- json_result_flat$items$snippet.tags[[1]] %>% toString() %>% as_tibble() %>% rename(tags = value)
+  
+  results <- results %>% dplyr::as_tibble() %>% 
+    select(-snippet.tags)
+  
+  results <- results %>% bind_cols(tags)
+    
   
 }
 
-get_video_stats("6kWWLOampOM")
+test <- get_video_data("6kWWLOampOM")
+
+
 ```
 
+Redoing this to get the tags right...
 
 ```{r}
+tbl <- read_rds("data/raw_data_from_yt.rds")
+
+tbl <- tbl %>%
+  mutate(video_id = str_remove(snippet.thumbnails.default.url, "https://i.ytimg.com/vi/"),
+         video_id = str_remove(video_id, "/default.jpg"))
+
 
 list_of_album_reviews <- tbl %>% 
   select(video_id, snippet.title) %>% 

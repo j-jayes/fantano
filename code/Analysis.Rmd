@@ -12,6 +12,8 @@ library(tidyverse)
 library(tidymodels)
 library(lubridate)
 library(glue)
+
+theme_set(theme_light())
 ```
 
 ## Purpose
@@ -46,6 +48,7 @@ df %>%
        y = "Number of albums")
 ```
 
+A lovely distribution centred around 7/10.
 
 ### Scores over time?
 
@@ -68,7 +71,6 @@ ggplotly(g, tooltip = "text")
 With ggiraph
 
 ```{r}
-library(plotly)
 
 g <- df %>% 
   mutate(title = str_remove(snippet_title, "ALBUM REVIEW")) %>% 
@@ -94,10 +96,15 @@ df %>%
          stat = str_to_title(stat)) %>% 
   ggplot(aes(value, score)) +
   geom_jitter(alpha = .5,
-              height = .8) +
+              height = .8,
+              colour = "lightblue") +
   geom_smooth() +
-  scale_x_log10(labels = scales::number_format()) +
-  facet_wrap(~ stat, scales = "free_x")
+  scale_x_log10(labels = scales::number_format(accuracy = 1)) +
+  facet_wrap(~ stat, scales = "free_x") +
+  labs(x = NULL,
+       y = NULL,
+       title = "How do viewers of Needle Drop videos respond to different scores?")
+
 ```
 
 What can we say about this?
@@ -121,21 +128,63 @@ df %>%
   unnest(tidied) %>% 
   filter(term != "(Intercept)") %>% 
   ggplot(aes(estimate, stat)) +
-  geom_point() +
   geom_errorbarh(aes(xmin = conf.low, xmax = conf.high)) +
+  geom_point(colour = "lightblue", cex = 5) +
   geom_vline(xintercept = 0, lty = 2) +
-  labs(x = "Effect of log of term on score",
+  labs(x = "Effect of log of term on album score",
        y = NULL,
        title = "What is the correlation between view statistics and album score?")
+
+```
+
+What is the relationship between duration of video and the score? Does Fantano spend more time time describing an album that he really enjoyed?
+
+```{r}
+df %>% 
+  ggplot(aes(duration, score)) +
+  geom_smooth() +
+  geom_jitter(colour = "lightblue") +
+  scale_x_log10() +
+  labs(x = "Duration of video in seconds",
+       y = "Album score") +
+  scale_y_continuous(labels = scales::number_format(accuracy = 1))
+
+df %>% 
+  lm(score ~ log(duration), data = .) %>% tidy() 
+  # kableExtra::kable() maybe do this for post
+```
+
+How else can we ask this question?
+
+```{r}
+library(ggridges)
+
+df %>% 
+  # filter(score > 2) %>% maybe include this limit?
+  ggplot(aes(x = duration, y = factor(score), fill = score)) +
+  geom_density_ridges(show.legend = F) +
+  scale_fill_gradient2(low = "blue", high = "orange", midpoint = 5) +
+  scale_x_log10(lim = c(200, 2000)) +
+  labs(y = "Album score",
+       x = "Duration of video in seconds",
+       title = "How does review duration relate to score?")
 
 ```
 
 ### Tags
 
 ```{r}
+library(tidytext)
 tags <- df %>% 
-    select(tags, score) %>% 
-    separate_rows(tags, sep = ";")
+  filter(row_number() == 1)
+  
+tags %>% select(tags) %>% pull()
+  
+
+  mutate(tags = as.character(tags)) %>% 
+  unnest_tokens(output = word, input = tags,format = "text", token = "regex", pattern = ";")
+
+tags %>% tail() %>% select(tags)
 
 ```
 
@@ -168,6 +217,12 @@ basic_rec <- recipe(score ~ ., data = train) %>%
                 snippet_description, 
                 score_raw, 
                 new_role =  "id") %>% 
+    # make score numeric ~ not sure why this has to be done again... recipes quirk
+    step_mutate(score = as.numeric(score)) %>% 
+    # making duration into seconds rather than 
+    step_mutate(duration = as.numeric(duration)) %>% 
+    # the numeric vars really need to be logged
+    step_log(starts_with("statistic"), duration, base = 10) %>% 
     # make the tags and text tokens at the word level.
     step_tokenize(text) %>% 
     # remove stopwords
@@ -178,8 +233,6 @@ basic_rec <- recipe(score ~ ., data = train) %>%
     # we'll tune these later
     step_tokenfilter(text, max_tokens = 200) %>% 
     step_tf(text, tags) %>% 
-    # making duration into seconds rather than 
-    step_mutate(duration = as.numeric(duration)) %>% 
     # make date
     step_date(published_date, 
               # make lots of features just to see
@@ -200,8 +253,7 @@ glmnet_recipe <-
   step_novel(all_nominal_predictors()) %>% 
   step_dummy(all_nominal_predictors()) %>% 
   step_nzv(all_predictors()) %>% 
-  step_normalize(all_numeric_predictors()) %>% 
-  step_mutate(score = as.numeric(score))
+  step_normalize(all_numeric_predictors())
 
 glmnet_recipe %>% prep() %>% juice()
 
