@@ -280,7 +280,8 @@ album_reviews <- album_reviews %>%
   select(-snippet.title) %>% 
   unnest(video_data)
 
-write_rds(album_reviews, "data/album_reviews_raw.rds")
+
+write_rds(album_reviews, "data/album_reviews_raw_added_tags.rds")
 
 ```
 

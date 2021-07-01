@@ -28,14 +28,12 @@ tbl <- tbl %>%
            snippet.description,
            contentDetails.duration,
            starts_with("statistics"),
-           snippet.tags,
+           tags,
            text
            ) %>% 
-    mutate(tags = paste(unlist(snippet.tags), 
-                        collapse = ";"), # Have to do this for the recipe below...
-           score = 0) %>% 
-    select(-snippet.tags,
-           statistics.favoriteCount)
+           mutate(score = 0) %>% 
+    select(-statistics.favoriteCount)
+
 ```
 
 Some reviews (176) didn't get captions from the captions API. 
@@ -47,6 +45,8 @@ tbl %>%
 tbl <- tbl %>%
     mutate(text = str_remove(text, "A n e x c e p t i o n o c c u r r e d"),
            text = na_if(text, ""))
+
+# write_rds(tbl, "data/clean_data_1_july.rds")
 ```
 
 ### Recipe for cleaning
@@ -75,7 +75,7 @@ df <- juiced_data
 df <- df %>% 
     janitor::clean_names()
 
-# write_rds(df, "data/clean_data_with_transcripts.rds")
+# write_rds(df, "data/clean_data_with_transcripts_1_july.rds")
 ```
 
 ### Recipe for modelling

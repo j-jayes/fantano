@@ -39,7 +39,7 @@ Could maybe do these in a recipe so that I can deploy it via Github Actions and 
 - duration
 
 ```{r}
-tbl <- read_rds("data/album_reviews_raw.rds")
+tbl <- read_rds("data/album_reviews_raw_added_tags.rds")
 
 tbl %>% skimr::skim()
 
@@ -134,9 +134,9 @@ tbl %>%
 Tags
 
 ```{r}
-tbl %>% 
-    select(snippet.tags) %>% 
-    mutate(tags = paste(unlist(snippet.tags), collapse = ";"))
+# tbl %>% 
+#     select(snippet.tags) %>% 
+#     mutate(tags = paste(unlist(snippet.tags), collapse = ";"))
 
 review_list <- tbl %>%
     filter(contentDetails.caption == "true") %>% 
