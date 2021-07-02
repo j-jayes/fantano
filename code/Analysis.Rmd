@@ -23,10 +23,13 @@ EDA and modelling for Needle Drop Dataset to predict score from words
 ### Reading in data
 
 ```{r}
-df <- read_rds("data/clean_data_with_transcripts.rds")
+df <- read_rds("data/clean_data_1_july.rds")
 
+colnames(df)
+
+# we have some missing score data so we will filter it out.
 df <- df %>% 
-  select(-statistics_favorite_count)
+  filter(!is.na(score))
 ```
 
 ## EDA
@@ -56,7 +59,7 @@ A lovely distribution centred around 7/10.
 library(plotly)
 
 g <- df %>% 
-  mutate(title = str_remove(snippet_title, "ALBUM REVIEW")) %>% 
+  mutate(title = str_remove(video_title, "ALBUM REVIEW")) %>% 
     ggplot(aes(published_date, score, text = glue("{title} - {score}"))) +
     geom_jitter(aes(colour = score),
                 width = 0, height = .6, show.legend = FALSE) +
@@ -73,7 +76,7 @@ With ggiraph
 ```{r}
 
 g <- df %>% 
-  mutate(title = str_remove(snippet_title, "ALBUM REVIEW")) %>% 
+  mutate(title = str_remove(video_title, "ALBUM REVIEW")) %>% 
     ggplot(aes(published_date, score, text = glue("{title} - {score}"))) +
     geom_jitter(aes(colour = score),
                 width = 0, height = .6, show.legend = FALSE) +
@@ -90,7 +93,7 @@ ggplotly(g, tooltip = "text")
 
 ```{r}
 df %>% 
-  select(score, starts_with("statistics")) %>% 
+  select(score, contains("statistics")) %>% 
   pivot_longer(-score, names_to = "stat") %>% 
   mutate(stat = str_replace_all(stat, "_", " "),
          stat = str_to_title(stat)) %>% 
@@ -115,7 +118,7 @@ We can also make a linear model and display the results as a tie-fighter plot. T
 
 ```{r}
 df %>% 
-  select(score, starts_with("statistics")) %>% 
+  select(score, contains("statistics")) %>% 
   pivot_longer(-score, names_to = "stat") %>% 
   mutate(stat = str_replace_all(stat, "_", " "),
          stat = str_to_title(stat),
@@ -144,10 +147,10 @@ df %>%
   ggplot(aes(duration, score)) +
   geom_smooth() +
   geom_jitter(colour = "lightblue") +
-  scale_x_log10() +
+  scale_x_log10(lim = c(150, 3000)) +
   labs(x = "Duration of video in seconds",
        y = "Album score") +
-  scale_y_continuous(labels = scales::number_format(accuracy = 1))
+  scale_y_continuous(labels = scales::number_format(accuracy = 1)) 
 
 df %>% 
   lm(score ~ log(duration), data = .) %>% tidy() 
@@ -168,23 +171,31 @@ df %>%
   labs(y = "Album score",
        x = "Duration of video in seconds",
        title = "How does review duration relate to score?")
-
 ```
 
 ### Tags
 
 ```{r}
 library(tidytext)
-tags <- df %>% 
-  filter(row_number() == 1)
+tags <- df
   
-tags %>% select(tags) %>% pull()
-  
+tags <- tags %>% select(tags) %>% 
+  unnest_tokens(output = tags, input = tags, token = stringr::str_split, pattern = ", ") %>% 
+  anti_join(stop_words, by = c("tags" = "word"))
 
-  mutate(tags = as.character(tags)) %>% 
-  unnest_tokens(output = word, input = tags,format = "text", token = "regex", pattern = ";")
+tags %>% 
+  count(tags, sort = T) %>% 
+  slice_max(n, n = 50, with_ties = F) %>% 
+  mutate(tags = fct_reorder(tags, n)) %>% 
+  ggplot(aes(n, tags, fill = n)) +
+  geom_col()
 
-tags %>% tail() %>% select(tags)
+tags %>% 
+  filter(str_detect(tags, "rvwz")) %>% 
+  count(tags, sort = T)
+
+df %>% 
+  filter(str_detect(tags, "rvwz"))
 
 ```
 
@@ -222,7 +233,7 @@ basic_rec <- recipe(score ~ ., data = train) %>%
     # making duration into seconds rather than 
     step_mutate(duration = as.numeric(duration)) %>% 
     # the numeric vars really need to be logged
-    step_log(starts_with("statistic"), duration, base = 10) %>% 
+    step_log(contains("statistic"), duration, base = 10) %>% 
     # make the tags and text tokens at the word level.
     step_tokenize(text) %>% 
     # remove stopwords

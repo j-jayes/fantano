@@ -7,9 +7,232 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(httr)
+library(glue)
+
 ```
 
-## Purpose
+# Purpose
 
 Get the data and make it nice and tidy.
+
+## Structure
+
+Query API for Youtube to get the information about the videos and the descriptions from the Needle Drop album reviews.
+
+We need to get a list of all of the uploads.
+
+Then we need to filter these to get only the album reviews.
+
+## Start with quarying API for channel content
+
+I plan to rewrite this section into tidy format.
+
+```{r}
+key <- "AIzaSyBHGmTJ2uLeMsIjBUN3jN7G3RSjozkaq8k"
+user_id <- "theneedledrop"  # Username
+base <- "https://www.googleapis.com/youtube/v3/"
+```
+
+```{r}
+# Construct the API call
+api_params <- 
+  paste(paste0("key=", key), 
+        paste0("forUsername=", user_id), 
+        "part=snippet,contentDetails,statistics",
+        sep = "&")
+
+api_call <- paste0(base, "channels", "?", api_params)
+api_result <- GET(api_call)
+json_result <- content(api_result, "text", encoding="UTF-8")
+```
+
+```{r}
+# Process the raw data into a data frame
+channel.json <- fromJSON(json_result, flatten = T)
+channel.df <- channel.json$items %>% as_tibble()
+
+# get playlist id for uploads
+channel.df %>% 
+    select(contentDetails.relatedPlaylists.uploads)
+
+playlist_id <- channel.df %>% 
+    select(contentDetails.relatedPlaylists.uploads) %>% as.character()
+```
+
+Get all videos from uploads, call it upload.df.
+
+```{r}
+# temporary variables
+nextPageToken <- ""
+upload.df <- NULL
+pageInfo <- NULL
+# Loop through the playlist while there is still a next page
+while (!is.null(nextPageToken)) {
+  # Construct the API call
+  api_params <- 
+    paste(paste0("key=", key), 
+          paste0("playlistId=", playlist_id), 
+          "part=snippet,contentDetails,status",
+          "maxResults=50",
+          sep = "&")
+  
+  # Add the page token for page 2 onwards
+  if (nextPageToken != "") {
+    api_params <- paste0(api_params,
+                         "&pageToken=",nextPageToken)
+  }
+  
+  api_call <- paste0(base, "playlistItems", "?", api_params)
+  api_result <- GET(api_call)
+  json_result <- content(api_result, "text", encoding="UTF-8")
+  upload.json <- fromJSON(json_result, flatten = T)
+  
+  nextPageToken <- upload.json$nextPageToken
+  pageInfo <- upload.json$pageInfo
+  
+  curr.df <- as.data.frame(upload.json$items)
+  if (is.null(upload.df)) {
+    upload.df <- curr.df
+  } else {
+    upload.df <- bind_rows(upload.df, curr.df)
+  }
+}
+
+upload_tbl <- upload.df %>% as_tibble()
+
+# upload_tbl %>% head() %>% view()
+```
+
+### Get data about each video from the API.
+
+Get the ID (I call it `video_id`) for each video from the URL of the thumbnails that was returned in the uploads query.
+
+```{r}
+tbl <- upload_tbl
+
+tbl <- tbl %>%
+  mutate(video_id = str_remove(snippet.thumbnails.default.url, "https://i.ytimg.com/vi/"),
+         video_id = str_remove(video_id, "/default.jpg"))
+```
+
+Function to get data about the video from the API.
+
+```{r}
+get_video_data <- function(video_id){
+  
+  base <- "https://www.googleapis.com/youtube/v3/"
+  
+  key <- "AIzaSyBHGmTJ2uLeMsIjBUN3jN7G3RSjozkaq8k"
+  
+  part <- "part=id,statistics,contentDetails,snippet"
+  
+  api_call <- 
+    glue::glue(base,
+         "videos?",
+         part,
+         "&",
+         "id=",
+         video_id,
+         "&",
+         "key=",key)
+  # GET the API call
+  api_result <- httr::GET(api_call)
+  # get the result in a JSON format
+  json_result <- httr::content(api_result, "text", encoding="UTF-8")
+  # flatten result
+  json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
+  # get only what we care about from the call. These are stored in the items list
+  results <- json_result_flat$items
+  # the tags are a list and we want to get them into a comma seperated character variable.
+  tags <- json_result_flat$items$snippet.tags[[1]] %>% toString() %>% as_tibble() %>% rename(tags = value)
+  # get just the other items
+  results <- results %>% dplyr::as_tibble() %>% 
+    select(-snippet.tags)
+  # stick them together.
+  results <- results %>% bind_cols(tags)
+ 
+  results    
+  
+}
+
+# test <- get_video_data("6kWWLOampOM")
+```
+
+Map the video ids across the new function, for only the videos that are album reviews.
+
+```{r}
+list_of_album_reviews <- tbl %>% 
+  select(video_id, snippet.title) %>% 
+  filter(str_detect(snippet.title, "ALBUM REVIEW"))
+
+album_reviews <- list_of_album_reviews %>% 
+  # look at this cool map function! 
+  mutate(video_data = map(video_id, get_video_data))
+
+album_reviews <- album_reviews %>% 
+  select(-snippet.title) %>% 
+  unnest(video_data)
+
+# write_rds(album_reviews, "data/album_reviews_raw_added_tags.rds")
+```
+
+### Transcripts
+
+I moved to python to get the transcripts and join them together. I'll link the jupyter notebook here at some point. It's a bit janky.
+
+### Reading in data for processing
+
+```{r}
+tbl <- read_rds("data/transcripts_filtered_and_data.rds")
+
+tbl <- tbl %>% 
+    select(video_id,
+           snippet.title,
+           snippet.publishedAt,
+           snippet.description,
+           contentDetails.duration,
+           starts_with("statistics"),
+           tags,
+           text) %>% 
+    select(-statistics.favoriteCount)
+
+```
+
+Some reviews (176) didn't get captions from the captions API. 
+
+```{r}
+tbl %>%
+    count(text, sort = T)
+```
+
+
+```{r}
+tbl <- tbl %>% 
+    # problem is the missing texts
+  mutate(text = str_remove(text, "A n e x c e p t i o n o c c u r r e d"),
+           text = na_if(text, "")) %>% 
+  # the \n before it is to correct for the song called 10/10 by Rex Orange County
+  mutate(score_raw = str_extract(snippet.description, "\n[0-9]/10|\n10/10|CLASSIC"),
+         # numeric score
+         score = parse_number(score_raw),
+         # date
+         published_date = lubridate::date(snippet.publishedAt),
+         # duration as numeric
+         duration = lubridate::duration(contentDetails.duration),
+         # numeric across the statistics
+         across(starts_with("statistics"), fn = ~ as.numeric(.)),
+         url = str_c("https://www.youtube.com/watch?v=", video_id)) %>% 
+    # nice variable names
+    janitor::clean_names() %>% 
+    select(-snippet_published_at, -content_details_duration) %>% 
+    rename_with(~ str_replace(.x, "snippet", "video")) %>% 
+    rename_with(~ str_replace(.x, "statistics", "video_statistics")) %>% 
+    # put score first
+    relocate(score, .before = video_id)
+
+write_rds(tbl, "data/clean_data_1_july.rds")
+```
 

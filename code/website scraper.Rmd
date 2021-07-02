@@ -26,10 +26,8 @@ Then we need to filter these to get only the album reviews.
 
 ```{r}
 key <- "AIzaSyBHGmTJ2uLeMsIjBUN3jN7G3RSjozkaq8k"
-
 user_id <- "theneedledrop"  # Username
 base <- "https://www.googleapis.com/youtube/v3/"
-
 ```
 
 
@@ -250,13 +248,12 @@ get_video_data <- function(video_id){
     select(-snippet.tags)
   
   results <- results %>% bind_cols(tags)
-    
+  
+  results  
   
 }
 
-test <- get_video_data("6kWWLOampOM")
-
-
+# test <- get_video_data("VEXWqh3g9eY")
 ```
 
 Redoing this to get the tags right...
