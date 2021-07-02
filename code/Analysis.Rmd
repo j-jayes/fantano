@@ -143,14 +143,14 @@ df %>%
 What is the relationship between duration of video and the score? Does Fantano spend more time time describing an album that he really enjoyed?
 
 ```{r}
-df %>% 
-  ggplot(aes(duration, score)) +
-  geom_smooth() +
-  geom_jitter(colour = "lightblue") +
-  scale_x_log10(lim = c(150, 3000)) +
-  labs(x = "Duration of video in seconds",
-       y = "Album score") +
-  scale_y_continuous(labels = scales::number_format(accuracy = 1)) 
+# df %>% 
+#   ggplot(aes(duration, score)) +
+#   geom_smooth() +
+#   geom_jitter(colour = "lightblue") +
+#   scale_x_log10(lim = c(150, 3000)) +
+#   labs(x = "Duration of video in seconds",
+#        y = "Album score") +
+#   scale_y_continuous(labels = scales::number_format(accuracy = 1)) 
 
 df %>% 
   lm(score ~ log(duration), data = .) %>% tidy() 
@@ -173,10 +173,37 @@ df %>%
        title = "How does review duration relate to score?")
 ```
 
-### Tags
+### Text
+
+What does he say in his reviews?
 
 ```{r}
 library(tidytext)
+
+words <- df %>% 
+  unnest_tokens(word, text) %>% 
+  select(score, video_title, word)
+
+words <- words %>% 
+  anti_join(stop_words)
+
+words %>% 
+  count(word, sort = T) %>% 
+  head(100) %>% view()
+
+words %>% 
+  count(word, sort = T) %>% 
+  slice_max(n, n = 50, with_ties = F) %>% 
+  mutate(tags = fct_reorder(tags, n)) %>% 
+  ggplot(aes(n, tags, fill = n)) +
+  geom_col()
+
+```
+
+
+### Tags
+
+```{r}
 tags <- df
   
 tags <- tags %>% select(tags) %>% 
@@ -197,6 +224,7 @@ tags %>%
 df %>% 
   filter(str_detect(tags, "rvwz"))
 
+# so we can remove the rvwz from the tags
 ```
 
 ### Recipe for modelling
@@ -204,10 +232,13 @@ df %>%
 Prep for modelling
 
 ```{r}
-small_sample <- df %>% sample_n(500)
+small_sample <- df %>% na.omit()
+
+# %>% sample_n(500)
 
 skimr::skim(small_sample)
 
+set.seed(123)
 spl <- initial_split(small_sample)
 
 train <- training(spl)
@@ -224,8 +255,8 @@ library(textrecipes)
 basic_rec <- recipe(score ~ ., data = train) %>% 
     # update role for ids
     update_role(video_id, 
-                snippet_title, 
-                snippet_description, 
+                video_title, 
+                video_description, 
                 score_raw, 
                 new_role =  "id") %>% 
     # make score numeric ~ not sure why this has to be done again... recipes quirk
@@ -242,7 +273,7 @@ basic_rec <- recipe(score ~ ., data = train) %>%
     # we'll tune these later
     step_tokenfilter(tags, max_tokens = 20) %>% 
     # we'll tune these later
-    step_tokenfilter(text, max_tokens = 200) %>% 
+    step_tokenfilter(text, max_tokens = tune()) %>% 
     step_tf(text, tags) %>% 
     # make date
     step_date(published_date, 
@@ -266,7 +297,7 @@ glmnet_recipe <-
   step_nzv(all_predictors()) %>% 
   step_normalize(all_numeric_predictors())
 
-glmnet_recipe %>% prep() %>% juice()
+# glmnet_recipe %>% prep() %>% juice()
 
 glmnet_spec <- 
   linear_reg(penalty = tune(),
@@ -279,7 +310,8 @@ glmnet_workflow <-
   add_recipe(glmnet_recipe) %>% 
   add_model(glmnet_spec) 
 
-glmnet_grid <- tidyr::crossing(penalty = 10^seq(-6, -1, length.out = 10)) 
+glmnet_grid <- tidyr::crossing(penalty = 10^seq(-6, -1, length.out = 10),
+                               max_tokens = c(200, 500)) 
 
 glmnet_tune <- 
   tune_grid(glmnet_workflow, resamples = folds, grid = glmnet_grid)
@@ -293,11 +325,15 @@ glmnet_tune %>%
 glmnet_tune %>% 
   select_best(metric = "rsq")
 
-glmnet_workflow_final <- glmnet_workflow %>% 
+glmnet_workflow_final <- glmnet_workflow %>%
   finalize_workflow(parameters = select_best(glmnet_tune, metric = "rsq"))
+```
 
-final_fit <- glmnet_workflow_final %>% 
-  last_fit(spl)
+Hard code final values for the moment
+
+```{r}
+# glmnet_workflow_final <- glmnet_workflow %>% 
+#   finalize_workflow(parameters = tibble(penalty = 0.0278, mixture = 1))
 
 glm_fit <- glmnet_workflow_final %>% 
   fit(test)
@@ -309,15 +345,16 @@ fit$fit$beta %>%
   mutate(col = parse_number(column),
          abs_value = abs(value)) %>% 
   filter(col == max(col)) %>%
-  slice_max(abs_value, n = 50, with_ties = F) %>% 
+  slice_max(abs_value, n = 20, with_ties = F) %>% 
   mutate(row = fct_reorder(row, value)) %>% 
   ggplot(aes(value, row)) +
   geom_col() +
   geom_vline(xintercept = 0, lty = 2)
 
-final_fit %>% 
-  collect_metrics()
 ```
+
+### Now let's use a 
+
 
 ### Next let's go with a bagged tree model
 

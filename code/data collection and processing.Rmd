@@ -233,6 +233,231 @@ tbl <- tbl %>%
     # put score first
     relocate(score, .before = video_id)
 
-write_rds(tbl, "data/clean_data_1_july.rds")
+# removing strangs things from text in tags.
+tbl <- tbl %>% 
+  mutate(tags = str_remove_all(tags, "rvwz"))
+
+# write_rds(tbl, "data/clean_data_1_july.rds")
 ```
+
+### Now i want to get the data from the spotify API about the music.
+
+Following advice from [this article](https://medium.com/swlh/accessing-spotifys-api-using-r-1a8eef0507c) on how to access the spotify API.
+
+
+
+```{r}
+
+id <- "2a85e163bc1d4deeb6569f6e2aff09cf"
+secret <- "3ce40c489719404db703462447d58616"
+
+response = POST(
+  'https://accounts.spotify.com/api/token',
+  accept_json(),
+  authenticate(id, secret),
+  body = list(grant_type = 'client_credentials'),
+  encode = 'form',
+  verbose()
+)
+mytoken = content(response)$access_token
+HeaderValue = glue("Bearer ", mytoken)
+
+```
+
+We need to start by getting artist and album ids.
+
+```{r}
+df %>% 
+    select(video_title)
+
+df <- df %>% 
+    mutate(video_artist = str_extract(video_title, ".*-"),
+           video_artist = str_squish(str_remove(video_artist, "-")),
+           video_album_query = str_squish(str_remove(video_title, "ALBUM REVIEW")))
+
+df %>% select(video_title, video_artist, video_album_query) %>% tail(10)
+```
+
+Function to get artist data
+
+```{r}
+get_artist_data <- function(video_artist){
+  
+  base <- "https://api.spotify.com/v1/search?q="
+  
+  params <- "&type=artist&market=GB&limit=1"
+  
+  artist_name_url_encoded <- video_artist %>% URLencode()
+  
+  # call consists of uri = base + artist name as string + params
+  api_call <- glue::glue(
+         base,
+         artist_name_url_encoded,
+         params)
+  # GET the API call
+  api_result <- httr::GET(api_call, add_headers(Authorization = HeaderValue), 
+                                    add_headers("Accept: application/json"),
+                                    add_headers("Content-Type: application/json"))
+  
+  # get the result in a JSON format
+  json_result <- httr::content(api_result, "text", encoding="UTF-8")
+  # flatten result
+  json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
+  
+  # collect name, id, popularity, genres, followers, data. 
+  # name is just a check to make sure that it is the same as from the reviews
+  spotify_artist_name <- json_result_flat$artists$items$name
+  
+  spotify_artist_id <- json_result_flat$artists$items$id
+  
+  spotify_artist_popularity <- json_result_flat$artists$items$popularity
+
+  spotify_artist_genres <- json_result_flat$artists$items$genres[[1]] %>% toString()
+  
+  spotify_artist_followers <- json_result_flat$artists$items$followers.total
+  
+  spotify_artist_data <- tibble(spotify_artist_name,
+                                spotify_artist_id, 
+                                spotify_artist_genres,
+                                spotify_artist_popularity, 
+                                spotify_artist_followers)
+  
+  spotify_artist_data
+}
+
+# test <- get_artist_data("Jacob Collier")
+
+```
+
+Album information from name
+
+```{r}
+
+"Tyler%2C%20the%20Creator%20Call%20Me%20If%20You%20Get%20Lost&type=album"
+```
+
+```{r}
+video_album <- "King Gizzard & The Lizard Wizard - Butterfly 3000"
+
+get_album_id <- function(video_album_query){
+  
+  base <- "https://api.spotify.com/v1/search?q="
+  
+  params <- "&type=album&market=GB&limit=1"
+  
+  album_url_encoded <- video_album_query %>% URLencode()
+  
+  # call consists of uri = base + artist name as string + params
+  api_call <- glue::glue(
+         base,
+         album_url_encoded,
+         params)
+  # GET the API call
+  api_result <- httr::GET(api_call, add_headers(Authorization = HeaderValue), 
+                                    add_headers("Accept: application/json"),
+                                    add_headers("Content-Type: application/json"))
+  
+  # get the result in a JSON format
+  json_result <- httr::content(api_result, "text", encoding="UTF-8")
+  # flatten result
+  json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
+  
+  # collect name, id, popularity, genres, followers, data. 
+  # name is just a check to make sure that it is the same as from the reviews
+  spotify_album_name <- json_result_flat$albums$items$name
+  
+  spotify_album_id <- json_result_flat$albums$items$id
+  
+  spotify_album_release_date <- json_result_flat$albums$items$release_date
+
+  spotify_album_n_tracks <- json_result_flat$albums$items$total_tracks
+  
+  spotify_album_data <- tibble(spotify_album_name,
+                                spotify_album_id, 
+                                spotify_album_release_date,
+                                spotify_album_n_tracks)
+  
+  spotify_album_data
+}
+
+test <- get_album_id("Tyler, the Creator - Flower Boy")
+
+```
+
+Album information from id
+
+```{r}
+
+spotify_album_id <- "2nkto6YNI4rUYTLqEwWJ3o"
+
+get_album_data <- function(spotify_album_id){
+  
+  base <- "https://api.spotify.com/v1/albums/"
+  
+  params <- "/tracks"
+  
+  # call consists of uri = base + artist name as string + params
+  api_call <- glue::glue(
+         base,
+         spotify_album_id,
+         params)
+  # GET the API call
+  api_result <- httr::GET(api_call, add_headers(Authorization = HeaderValue), 
+                                    add_headers("Accept: application/json"),
+                                    add_headers("Content-Type: application/json"))
+  
+  # get the result in a JSON format
+  json_result <- httr::content(api_result, "text", encoding="UTF-8")
+  # flatten result
+  json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
+  
+  track_name <- json_result_flat$items$name
+  
+  track_id <- json_result_flat$items$id
+  
+  track_explicit <- json_result_flat$items$explicit
+  
+  spotify_track_data <- tibble(track_name,
+                               track_id, 
+                               track_explicit)
+
+  spotify_track_data
+}
+```
+
+Now to get song information and audio features
+
+```{r}
+
+track_id <- "6KuXb26rHuRy3ZDse1VRmx"
+
+get_song_audio_features <- function(track_id){
+  
+  base <- "https://api.spotify.com/v1/audio-features/"
+  
+  # call consists of uri = base + song id as string
+  api_call <- glue::glue(
+         base,
+         track_id)
+  # GET the API call
+  api_result <- httr::GET(api_call, add_headers(Authorization = HeaderValue), 
+                                    add_headers("Accept: application/json"),
+                                    add_headers("Content-Type: application/json"))
+  
+  # get the result in a JSON format
+  json_result <- httr::content(api_result, "text", encoding="UTF-8")
+  # flatten result
+  json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
+  
+  track_data <- json_result_flat %>% as_tibble() %>% select(danceability:tempo, duration_ms:time_signature)
+  
+  spotify_track_data <- tibble(track_name,
+                               track_id, 
+                               track_explicit)
+
+  spotify_track_data
+}
+
+```
+
 
