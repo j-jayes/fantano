@@ -244,8 +244,6 @@ tbl <- tbl %>%
 
 Following advice from [this article](https://medium.com/swlh/accessing-spotifys-api-using-r-1a8eef0507c) on how to access the spotify API.
 
-
-
 ```{r}
 
 id <- "2a85e163bc1d4deeb6569f6e2aff09cf"
@@ -271,73 +269,15 @@ df %>%
     select(video_title)
 
 df <- df %>% 
-    mutate(video_artist = str_extract(video_title, ".*-"),
-           video_artist = str_squish(str_remove(video_artist, "-")),
-           video_album_query = str_squish(str_remove(video_title, "ALBUM REVIEW")))
+    mutate(video_album_query = str_squish(str_remove(video_title, "ALBUM REVIEW")))
 
-df %>% select(video_title, video_artist, video_album_query) %>% tail(10)
-```
-
-Function to get artist data
-
-```{r}
-get_artist_data <- function(video_artist){
-  
-  base <- "https://api.spotify.com/v1/search?q="
-  
-  params <- "&type=artist&market=GB&limit=1"
-  
-  artist_name_url_encoded <- video_artist %>% URLencode()
-  
-  # call consists of uri = base + artist name as string + params
-  api_call <- glue::glue(
-         base,
-         artist_name_url_encoded,
-         params)
-  # GET the API call
-  api_result <- httr::GET(api_call, add_headers(Authorization = HeaderValue), 
-                                    add_headers("Accept: application/json"),
-                                    add_headers("Content-Type: application/json"))
-  
-  # get the result in a JSON format
-  json_result <- httr::content(api_result, "text", encoding="UTF-8")
-  # flatten result
-  json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
-  
-  # collect name, id, popularity, genres, followers, data. 
-  # name is just a check to make sure that it is the same as from the reviews
-  spotify_artist_name <- json_result_flat$artists$items$name
-  
-  spotify_artist_id <- json_result_flat$artists$items$id
-  
-  spotify_artist_popularity <- json_result_flat$artists$items$popularity
-
-  spotify_artist_genres <- json_result_flat$artists$items$genres[[1]] %>% toString()
-  
-  spotify_artist_followers <- json_result_flat$artists$items$followers.total
-  
-  spotify_artist_data <- tibble(spotify_artist_name,
-                                spotify_artist_id, 
-                                spotify_artist_genres,
-                                spotify_artist_popularity, 
-                                spotify_artist_followers)
-  
-  spotify_artist_data
-}
-
-# test <- get_artist_data("Jacob Collier")
-
+df %>% select(video_title, video_album_query) %>% tail(10)
 ```
 
 Album information from name
 
 ```{r}
-
-"Tyler%2C%20the%20Creator%20Call%20Me%20If%20You%20Get%20Lost&type=album"
-```
-
-```{r}
-video_album <- "King Gizzard & The Lizard Wizard - Butterfly 3000"
+video_album_query <- "Jackboys & Travis Scott - Self-Titled"
 
 get_album_id <- function(video_album_query){
   
@@ -346,6 +286,8 @@ get_album_id <- function(video_album_query){
   params <- "&type=album&market=GB&limit=1"
   
   album_url_encoded <- video_album_query %>% URLencode()
+  
+  message(glue("Getting album data about {video_album_query}"))
   
   # call consists of uri = base + artist name as string + params
   api_call <- glue::glue(
@@ -361,9 +303,14 @@ get_album_id <- function(video_album_query){
   json_result <- httr::content(api_result, "text", encoding="UTF-8")
   # flatten result
   json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
-  
-  # collect name, id, popularity, genres, followers, data. 
+    # collect name, id, popularity, genres, followers, data. 
   # name is just a check to make sure that it is the same as from the reviews
+  spotify_artist_name <- json_result_flat$albums$items$artists[[1]] %>% 
+      as_tibble() %>% head(1) %>% select(name) %>% as.character()
+  
+  spotify_artist_id <- json_result_flat$albums$items$artists[[1]] %>% 
+      as_tibble() %>% head(1) %>% select(id) %>% as.character()
+  
   spotify_album_name <- json_result_flat$albums$items$name
   
   spotify_album_id <- json_result_flat$albums$items$id
@@ -372,15 +319,60 @@ get_album_id <- function(video_album_query){
 
   spotify_album_n_tracks <- json_result_flat$albums$items$total_tracks
   
-  spotify_album_data <- tibble(spotify_album_name,
-                                spotify_album_id, 
-                                spotify_album_release_date,
-                                spotify_album_n_tracks)
-  
+  spotify_album_data <- tibble(spotify_artist_name,
+                               spotify_artist_id,
+                               spotify_album_name,
+                               spotify_album_id, 
+                               spotify_album_release_date,
+                               spotify_album_n_tracks)
   spotify_album_data
 }
 
-test <- get_album_id("Tyler, the Creator - Flower Boy")
+# test <- get_album_id("Tyler, the Creator Flower Boy")
+
+```
+
+Function to get artist data using artist id
+
+```{r}
+spotify_artist_id <- "7A8S43ryYdbWpJKeHRZRcq"
+
+get_artist_data <- function(spotify_artist_id){
+  
+  base <- "https://api.spotify.com/v1/artists/"
+  
+  message(glue("Getting artist data from {spotify_artist_id}"))
+  
+  # call consists of uri = base + artist name as string + params
+  api_call <- glue::glue(
+         base,
+         spotify_artist_id)
+  # GET the API call
+  api_result <- httr::GET(api_call, add_headers(Authorization = HeaderValue), 
+                                    add_headers("Accept: application/json"),
+                                    add_headers("Content-Type: application/json"))
+  
+  # get the result in a JSON format
+  json_result <- httr::content(api_result, "text", encoding="UTF-8")
+  # flatten result
+  json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
+  
+  # collect name, id, popularity, genres, followers, data. 
+  # name is just a check to make sure that it is the same as from the reviews
+    spotify_artist_popularity <- json_result_flat$popularity
+
+  spotify_artist_genres <- json_result_flat$genres %>% toString()
+  
+  spotify_artist_followers <- json_result_flat$followers$total
+  
+  spotify_artist_data <- tibble(spotify_artist_genres,
+                                spotify_artist_popularity, 
+                                spotify_artist_followers)
+  
+  spotify_artist_data
+}
+
+# test <- get_artist_data(test$spotify_artist_id)
 
 ```
 
@@ -395,6 +387,8 @@ get_album_data <- function(spotify_album_id){
   base <- "https://api.spotify.com/v1/albums/"
   
   params <- "/tracks"
+  
+  message(glue("Getting album data from {spotify_album_id}"))
   
   # call consists of uri = base + artist name as string + params
   api_call <- glue::glue(
@@ -423,6 +417,8 @@ get_album_data <- function(spotify_album_id){
 
   spotify_track_data
 }
+
+get_album_data("2nkto6YNI4rUYTLqEwWJ3o")
 ```
 
 Now to get song information and audio features
@@ -431,9 +427,11 @@ Now to get song information and audio features
 
 track_id <- "6KuXb26rHuRy3ZDse1VRmx"
 
-get_song_audio_features <- function(track_id){
+get_track_features <- function(track_id){
   
   base <- "https://api.spotify.com/v1/audio-features/"
+  
+  message(glue("Getting audio features from {track_id}"))
   
   # call consists of uri = base + song id as string
   api_call <- glue::glue(
@@ -449,15 +447,36 @@ get_song_audio_features <- function(track_id){
   # flatten result
   json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
   
-  track_data <- json_result_flat %>% as_tibble() %>% select(danceability:tempo, duration_ms:time_signature)
+  track_features <- json_result_flat %>% as_tibble() %>% select(danceability:tempo, duration_ms:time_signature)
   
-  spotify_track_data <- tibble(track_name,
-                               track_id, 
-                               track_explicit)
+  spotify_track_features <- tibble(track_features)
 
-  spotify_track_data
+  spotify_track_features
 }
 
+# get_track_features("430qNtapCS3Ue1yoSql1oV")
 ```
 
+### Using these neat ol functions
+
+First we will get the id for each album and artist. These are needed to query the database further.
+
+```{r}
+test <- df %>% 
+    head(10) %>% 
+    mutate(spotify_album_artist_ids = map(video_album_query, possibly(get_album_id, "Failed"))) 
+
+test <- test %>% 
+    unnest(spotify_album_artist_ids)
+```
+
+Next we must get the artist information
+
+```{r}
+test <- test %>% 
+    mutate(spotify_artist_data = map(spotify_artist_id, possibly(get_artist_data, "Failed"))) 
+
+test <- test %>% 
+    unnest(spotify_artist_data)
+```
 
