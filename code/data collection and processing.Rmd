@@ -277,7 +277,7 @@ df %>% select(video_title, video_album_query) %>% tail(10)
 Album information from name
 
 ```{r}
-video_album_query <- "Jackboys & Travis Scott - Self-Titled"
+video_album_query <- "Greta Van Fleet - The Battle at Garden's Gate"
 
 get_album_id <- function(video_album_query){
   
@@ -328,7 +328,7 @@ get_album_id <- function(video_album_query){
   spotify_album_data
 }
 
-# test <- get_album_id("Tyler, the Creator Flower Boy")
+# test <- get_album_id("Greta Van Fleet - The Battle at Garden's Gate")
 
 ```
 
@@ -372,11 +372,11 @@ get_artist_data <- function(spotify_artist_id){
   spotify_artist_data
 }
 
-# test <- get_artist_data(test$spotify_artist_id)
+test <- get_artist_data(spotify_artist_id)
 
 ```
 
-Album information from id
+Album information from id. The results will be stored as a string, in most cases separated with a semicolon, except for the ids which will be sep with comma for use later.
 
 ```{r}
 
@@ -405,7 +405,7 @@ get_album_data <- function(spotify_album_id){
   # flatten result
   json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
   
-  track_name <- json_result_flat$items$name
+  track_name <- json_result_flat$items$name %>% paste(collapse = "; ")
   
   track_id <- json_result_flat$items$id
   
@@ -447,36 +447,90 @@ get_track_features <- function(track_id){
   # flatten result
   json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
   
-  track_features <- json_result_flat %>% as_tibble() %>% select(danceability:tempo, duration_ms:time_signature)
+  track_features <- json_result_flat %>% as_tibble() %>% 
+    select(danceability:tempo, duration_ms:time_signature)
   
   spotify_track_features <- tibble(track_features)
 
   spotify_track_features
 }
 
-# get_track_features("430qNtapCS3Ue1yoSql1oV")
+# get_track_features("6KuXb26rHuRy3ZDse1VRmx")
 ```
 
 ### Using these neat ol functions
 
 First we will get the id for each album and artist. These are needed to query the database further.
 
+Not working perfectly...
+
+One way to do this would be that if the thing fails, remove the dash (-) from the album query and nest that within the possibly.
+
+
 ```{r}
-test <- df %>% 
-    head(10) %>% 
+df <- df %>% 
     mutate(spotify_album_artist_ids = map(video_album_query, possibly(get_album_id, "Failed"))) 
 
-test <- test %>% 
+df <- df %>% 
     unnest(spotify_album_artist_ids)
 ```
 
 Next we must get the artist information
 
-```{r}
-test <- test %>% 
-    mutate(spotify_artist_data = map(spotify_artist_id, possibly(get_artist_data, "Failed"))) 
 
-test <- test %>% 
+```{r}
+df <- df %>%
+    # this removes the ones that didn't get artist ids in the first step.
+    filter(is.na(spotify_album_artist_ids)) %>% 
+    mutate(spotify_artist_data = map(spotify_artist_id, possibly(get_artist_data, "Failed")))
+
+df <- df %>% 
     unnest(spotify_artist_data)
+```
+
+Now to get the information about the songs on the albums
+
+```{r}
+df <- df %>% 
+    mutate(spotify_album_data = map(spotify_album_id, possibly(get_album_data, "Failed"))) 
+
+df <- df %>% 
+  unnest(spotify_album_data)
+```
+
+```{r}
+df <- df %>% 
+    mutate(spotify_track_features = map(track_id, possibly(get_track_features, "Failed"))) 
+
+df <- df %>% 
+    unnest(spotify_track_features)
+```
+
+```{r}
+write_rds(df, "data/nice_nice_nice_data.rds")
+```
+
+
+Mutate to get the median or mean of the features?
+
+```{r}
+df %>% 
+  group_by(video_id) %>% 
+  mutate(danceability_mean = mean(danceability),
+         danceability_var = var(danceability)) %>% select(video_id, danceability, danceability_mean, danceability_var)
+
+
+```
+
+
+
+```{r}
+df <- df %>% nest(data = c(track_name, track_id, track_explicit, danceability, energy, 
+    key, loudness, mode, speechiness, acousticness, instrumentalness, 
+    liveness, valence, tempo, duration_ms, time_signature, spotify_track_features)) %>% 
+  distinct(video_id, .keep_all = T)
+
+write_rds(test_1, "data/audio_features_small.rds")
+
 ```
 

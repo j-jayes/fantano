@@ -227,6 +227,242 @@ df %>%
 # so we can remove the rvwz from the tags
 ```
 
+### Audio features?
+
+```{r}
+df <- read_rds("data/audio_features_small.rds")
+
+test_7 <- df %>% nest(data = c(track_name, track_id, track_explicit, danceability, energy, 
+    key, loudness, mode, speechiness, acousticness, instrumentalness, 
+    liveness, valence, tempo, duration_ms, time_signature, spotify_track_features)) %>% 
+  distinct(video_id, .keep_all = T)
+
+
+
+df %>% 
+  ggplot(aes(danceability)) +
+  geom_density()
+
+df %>% 
+  ggplot(aes(danceability, instrumentalness, colour = factor(score))) +
+  geom_point()
+
+df %>% 
+  count(time_signature, sort = T)
+
+df %>% count(track_explicit, sort = T)
+
+df %>% count(key, time_signature, sort = T)
+```
+
+
+```{r}
+df %>% 
+  ggplot(aes(spotify_artist_popularity, score)) +
+  geom_jitter() +
+  geom_smooth(method = "lm")
+
+```
+
+Hahah he's such a hipster. more popular leading to lower scores.
+
+```{r}
+df %>% 
+  ggplot(aes(x = spotify_artist_popularity, y = factor(score), fill = score)) +
+  geom_density_ridges(show.legend = F) +
+  scale_fill_gradient2(low = "blue", high = "orange", midpoint = 5) +
+  labs(y = "Album score",
+       x = "spotify_artist_popularity",
+       title = "How does spotify_artist_popularity relate to score?")
+
+```
+
+Are the fans normies?? 
+
+How can we tell? We need to correct for popularity of artist when analysing how much they agree or disagree with Fantano. Maybe divide comments and dislikes by views?
+
+Becasuse it makes sense that comment count increases with populairty - you'll watch the reviews that are of artists you care about.
+
+```{r}
+df %>% 
+  ggplot(aes(video_statistics_comment_count, spotify_artist_popularity)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  scale_x_log10()
+
+```
+
+That's hilarious!
+
+If we correct for views it's not as strong.
+
+```{r}
+df %>% 
+  mutate(comments_over_views = video_statistics_comment_count / video_statistics_view_count) %>% 
+  ggplot(aes(comments_over_views, spotify_artist_popularity)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  scale_x_log10()
+```
+
+What about the ratio of likes to dislikes? Or comments to dislikes?
+
+```{r}
+df %>% 
+  mutate(likes_to_dislikes = video_statistics_like_count / video_statistics_dislike_count) %>% 
+  ggplot(aes(likes_to_dislikes)) +
+  geom_density() +
+  facet_wrap( ~ score, scales = "free_y")
+
+```
+
+
+
+Another way to put this is to look at the popularity of the artist and the dislike count. wait what about ratio or views to dislikes??
+
+```{r}
+df %>% 
+  ggplot(aes(video_statistics_dislike_count, spotify_artist_followers)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  scale_x_log10() +
+  scale_y_log10()
+
+```
+
+
+```{r}
+df %>% 
+  mutate(dislikes_over_views = video_statistics_dislike_count / video_statistics_view_count) %>% 
+  ggplot(aes(dislikes_over_views, spotify_artist_followers)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  scale_x_log10() +
+  scale_y_log10()
+```
+
+We could do a regression with dislikes as dep var and popularity and views as xs?
+
+```{r}
+df %>% 
+  lm(log(video_statistics_dislike_count) ~ log(spotify_artist_followers) + 
+       log(video_statistics_view_count), 
+     data = .) %>% tidy()
+```
+
+```{r}
+df %>% 
+  ggplot(aes(x = danceability, y = factor(score), fill = score)) +
+  geom_density_ridges(show.legend = F) +
+  scale_fill_gradient2(low = "blue", high = "orange", midpoint = 5) +
+  labs(y = "Album score",
+       x = "danceability",
+       title = "How does danceability relate to score?")
+
+df %>% 
+  group_by(video_id) %>% 
+  mutate(danceability_mean = mean(danceability)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = danceability_mean, y = factor(score), fill = score)) +
+  geom_density_ridges(show.legend = F) +
+  scale_fill_gradient2(low = "blue", high = "orange", midpoint = 5) +
+  labs(y = "Album score",
+       x = "danceability",
+       title = "How does danceability relate to score?")
+
+df %>% 
+  group_by(video_id) %>% 
+  mutate(danceability_var = var(danceability)) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = danceability_var, y = factor(score), fill = score)) +
+  geom_density_ridges(show.legend = F) +
+  scale_fill_gradient2(low = "blue", high = "orange", midpoint = 5) +
+  labs(y = "Album score",
+       x = "danceability",
+       title = "How does danceability relate to score?")
+```
+
+Popularity?
+
+```{r}
+df %>% 
+  mutate(spotify_artist_popularity = 
+           spotify_artist_popularity - spotify_artist_popularity %% 10) %>% 
+  ggplot(aes(x = danceability, y = factor(spotify_artist_popularity), fill = spotify_artist_popularity)) +
+  geom_density_ridges(show.legend = F) +
+  scale_fill_gradient2(low = "blue", high = "orange", midpoint = 50) +
+  labs(y = "spotify_artist_popularity",
+       x = "danceability",
+       title = "How does danceability relate to spotify_artist_popularity?")
+
+```
+
+
+```{r}
+df_features <- df %>% 
+  select(score, spotify_artist_popularity, danceability:time_signature) %>% 
+  rename_all(.funs = ~ str_replace_all(.x, "_", " ")) %>%
+  rename_all(.funs = str_to_title) %>% 
+  pivot_longer(-c(Score, `Spotify Artist Popularity`), 
+               names_to = "audio_feature_name", 
+               values_to = "audio_feature_value") %>% 
+  pivot_longer(-c(audio_feature_name, audio_feature_value), 
+               names_to = "music_metric", 
+               values_to = "score_value")
+
+
+
+draw_features_ridges <- function(tbl, feature, metric){
+  
+  tbl <- tbl %>% 
+    filter(audio_feature_name == feature,
+           music_metric == metric) %>% 
+    mutate(score_value = if_else(music_metric == "Spotify Artist Popularity", 
+                                  score_value - score_value %% 10, 
+                                  score_value))
+  
+  mid_point = mean(tbl$score_value)
+  
+  mean_feature_value = round(mean(tbl$audio_feature_value, na.rm = T), 2)
+  
+  tbl %>% 
+    ggplot(aes(audio_feature_value, factor(score_value), fill = score_value)) +
+    geom_density_ridges(show.legend = F) +
+    scale_fill_gradient2(low = "blue", high = "orange", midpoint = mid_point) +
+    geom_vline(xintercept = mean_feature_value, lty = 2) + 
+    labs(y = glue("{metric}"),
+         x = glue("{feature}"),
+         title = glue("How does {feature} relate to {metric}?"),
+         subtitle = glue("Mean {feature} is {mean_feature_value}"))
+  
+}
+
+draw_features_ridges(df_features, "Energy", "Spotify Artist Popularity")
+
+draw_features_ridges(df_features, "Energy", "Score")
+
+```
+
+Crosstalk for a plot that allows selection without shiny
+
+```{r}
+library(crosstalk)
+
+shared_features <- df_features
+
+
+bscols(widths = c(3,NA),
+  list(
+    filter_select("audio_feature_name", "audio_feature_name", shared_features,
+                  ~ifelse(audio_feature_name == 0, "Danceability", "Energy", "Loudness")),
+  ),
+  d3scatter(shared_features, ~audio_feature_value, ~score_value, ~factor(score_value), width="100%", height=250),
+)
+
+
+```
+
+
 ### Recipe for modelling
 
 Prep for modelling

@@ -1,0 +1,105 @@
+---
+title: "testing crosstalk"
+author: "JJayes"
+date: "03/07/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(crosstalk)
+devtools::install_github("jcheng5/d3scatter")
+library(d3scatter)
+```
+
+
+```{r}
+shared_mtcars <- SharedData$new(mtcars)
+
+bscols(widths = c(3,NA,NA),
+  list(
+    filter_checkbox("cyl", "Cylinders", shared_mtcars, ~cyl, inline = TRUE),
+    filter_slider("hp", "Horsepower", shared_mtcars, ~hp, width = "100%"),
+    filter_select("auto", "Automatic", shared_mtcars, ~ifelse(am == 0, "Yes", "No"))
+  ),
+  d3scatter(shared_mtcars, ~wt, ~mpg, ~factor(cyl), width="100%", height=250),
+  d3scatter(shared_mtcars, ~hp, ~qsec, ~factor(cyl), width="100%", height=250)
+)
+```
+
+
+```{r}
+df_features_small <- df_features %>% 
+    filter(audio_feature_name %in% c("Danceability", "Energy"),
+           music_metric == "Score")
+
+shared_features <- SharedData$new(df_features_small)
+
+bscols(widths = c(3,NA),
+  list(
+    filter_select("audio_feature_name", "Audio Feature Name", shared_features, ~ifelse(audio_feature_name == 0, "Danceability", "Energy"))
+  ),
+  shared_features %>% ggplot(aes(audio_feature_value, score_value, colour = factor(score))) +
+      geom_point()
+)
+
+```
+
+
+
+
+Copied from a question on Rstudio
+
+```{r}
+library(ggplot2)
+library(plotly)
+library(crosstalk)
+
+
+# Initial data
+mtcars1 <- mtcars %>%
+  filter (vs==0) %>%
+  select (mpg, wt, cyl)
+
+mtcars2 <- mtcars %>%
+  filter (vs==1) %>%
+  select (mpg, wt, cyl)
+
+# Shared obbjects for crosstalk filters
+sd1 <- SharedData$new(mtcars1, group="group1")
+sd2 <- SharedData$new(mtcars2, group="group2")
+
+filter1 <- list(
+  crosstalk::filter_select("cyl","Cylinders:", sd1, ~cyl, multiple=FALSE)
+  )
+
+filter2 <- list(
+  crosstalk::filter_select("cyl2","Cylinders:", sd2, ~cyl, multiple=FALSE)
+  )
+
+# Alternative 1:
+# Each series in a different plot - It works fine, but it is not what i am after
+g1 <- ggplot2::ggplot(sd1) +
+  geom_point(aes(x=mpg, y=wt), color="red") +
+  theme_minimal() +
+  labs (title="Graph1", x="mpg", y="wt")
+gg1 <- ggplotly(g1)
+
+g2 <- ggplot2::ggplot(sd2) +
+  geom_point(aes(x=mpg, y=wt), color="green") +
+  theme_minimal() +
+  labs (title="Graph2", x="mpg", y="wt")
+gg2 <- ggplotly(g2)
+
+crosstalk::bscols(
+  widths=c(2,NA,NA,2),
+  filter1,
+  gg1,
+  gg2,
+  filter2
+)
+
+```
+
