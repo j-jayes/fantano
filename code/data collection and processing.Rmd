@@ -121,6 +121,8 @@ tbl <- tbl %>%
 Function to get data about the video from the API.
 
 ```{r}
+video_id <- "Ppn7Km1v7pA"
+
 get_video_data <- function(video_id){
   
   base <- "https://www.googleapis.com/youtube/v3/"
@@ -147,14 +149,16 @@ get_video_data <- function(video_id){
   # get only what we care about from the call. These are stored in the items list
   results <- json_result_flat$items
   # the tags are a list and we want to get them into a comma seperated character variable.
-  tags <- json_result_flat$items$snippet.tags[[1]] %>% toString() %>% as_tibble() %>% rename(tags = value)
+  tags <- json_result_flat$items$snippet.tags[[1]] %>% 
+    paste(collapse = "\n") %>%
+    as_tibble() %>% rename(tags = value)
   # get just the other items
   results <- results %>% dplyr::as_tibble() %>% 
     select(-snippet.tags)
   # stick them together.
   results <- results %>% bind_cols(tags)
  
-  results    
+  results 
   
 }
 
@@ -221,7 +225,7 @@ tbl <- tbl %>%
          # date
          published_date = lubridate::date(snippet.publishedAt),
          # duration as numeric
-         duration = lubridate::duration(contentDetails.duration),
+         video_duration = lubridate::duration(contentDetails.duration),
          # numeric across the statistics
          across(starts_with("statistics"), fn = ~ as.numeric(.)),
          url = str_c("https://www.youtube.com/watch?v=", video_id)) %>% 
@@ -359,9 +363,9 @@ get_artist_data <- function(spotify_artist_id){
   
   # collect name, id, popularity, genres, followers, data. 
   # name is just a check to make sure that it is the same as from the reviews
-    spotify_artist_popularity <- json_result_flat$popularity
+  spotify_artist_popularity <- json_result_flat$popularity
 
-  spotify_artist_genres <- json_result_flat$genres %>% toString()
+  spotify_artist_genres <- json_result_flat$genres %>% paste(collapse = "/n")
   
   spotify_artist_followers <- json_result_flat$followers$total
   
@@ -405,7 +409,7 @@ get_album_data <- function(spotify_album_id){
   # flatten result
   json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
   
-  track_name <- json_result_flat$items$name %>% paste(collapse = "; ")
+  track_name <- json_result_flat$items$name
   
   track_id <- json_result_flat$items$id
   
@@ -448,7 +452,8 @@ get_track_features <- function(track_id){
   json_result_flat <- jsonlite::fromJSON(json_result, flatten = T)
   
   track_features <- json_result_flat %>% as_tibble() %>% 
-    select(danceability:tempo, duration_ms:time_signature)
+    select(danceability:tempo, duration_ms:time_signature) %>% 
+    rename_all(~ str_c("feature_", .x))
   
   spotify_track_features <- tibble(track_features)
 
@@ -507,7 +512,7 @@ df <- df %>%
 ```
 
 ```{r}
-write_rds(df, "data/nice_nice_nice_data.rds")
+# write_rds(df, "data/nice_nice_nice_data.rds")
 ```
 
 

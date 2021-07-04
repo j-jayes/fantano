@@ -12,6 +12,7 @@ library(tidyverse)
 library(tidymodels)
 library(lubridate)
 library(glue)
+library(scales)
 
 theme_set(theme_light())
 ```
@@ -23,13 +24,20 @@ EDA and modelling for Needle Drop Dataset to predict score from words
 ### Reading in data
 
 ```{r}
-df <- read_rds("data/clean_data_1_july.rds")
+df <- read_rds("data/nice_nice_nice_data.rds")
 
 colnames(df)
 
 # we have some missing score data so we will filter it out.
 df <- df %>% 
   filter(!is.na(score))
+
+df <- df %>%
+  group_by(video_id) %>% 
+  mutate(across(track_explicit:time_signature, median)) %>% 
+  ungroup() %>% 
+  distinct(video_id, .keep_all = T)
+
 ```
 
 ## EDA
@@ -47,6 +55,7 @@ df %>%
   count(score) %>% 
   ggplot(aes(score, n)) +
   geom_col(fill = "lightblue") + # Come back to colours
+  scale_x_continuous(labels = number_format(accuracy = 1)) +
   labs(x = "Album score by Fantano",
        y = "Number of albums")
 ```
@@ -74,11 +83,12 @@ ggplotly(g, tooltip = "text")
 With ggiraph
 
 ```{r}
+library(ggiraph)
 
-g <- df %>% 
+df %>% 
   mutate(title = str_remove(video_title, "ALBUM REVIEW")) %>% 
     ggplot(aes(published_date, score, text = glue("{title} - {score}"))) +
-    geom_jitter(aes(colour = score),
+    geom_jitter_interactive(aes(colour = score),
                 width = 0, height = .6, show.legend = FALSE) +
     geom_smooth(method = "lm") +
     labs(y = "Album score",
@@ -462,20 +472,57 @@ bscols(widths = c(3,NA),
 
 ```
 
-
 ### Recipe for modelling
+
+Okay I think this is actually a two part problem. In the first part we want to find the words that are correlated with score, in the second part we actually want to do prediction - using a tree-based model. These don't work well with a lot of features that are sparse. Can maybe introduce a main genre in this second part to make use of genres?
+
+In the text analysis we want to do 3 things.
+
+First we want to see what genres he scores highly or poorly.
+
+Next we want to look at the words, bigrams and maybe trigrams that are correlated with a high or low score.
+
+Third we can try some LDA to see what he has spoken about. have a look at [step lda in textrecipes package](https://textrecipes.tidymodels.org/reference/step_lda.html)
 
 Prep for modelling
 
 ```{r}
-small_sample <- df %>% na.omit()
+df <- read_rds("data/nice_nice_nice_data.rds")
 
-# %>% sample_n(500)
+df %>% 
+  skimr::skim()
 
-skimr::skim(small_sample)
+df %>% 
+  tail() %>% view()
+```
+
+We stopped getting track features at some point.
+
+So for now we will just filter out the ones that didn't work and continue
+
+```{r}
+df_mod <- df %>% 
+  filter(is.na(spotify_track_features)) %>% 
+  select(-c(spotify_album_artist_ids, spotify_track_features)) %>% 
+  filter(!is.na(text))
+
+df_mod %>% 
+  count(video_id, sort = T)
+
+df_mod <- df_mod %>%
+  group_by(video_id) %>% 
+  mutate(across(danceability:time_signature, median)) %>% 
+  ungroup() %>%
+  distinct(video_id, .keep_all = T)
+```
+
+Now we have 1048 albums That's good for now.
+
+```{r}
+skimr::skim(df_mod)
 
 set.seed(123)
-spl <- initial_split(small_sample)
+spl <- initial_split(df_mod, strata = score)
 
 train <- training(spl)
 test <- testing(spl)
@@ -493,32 +540,188 @@ basic_rec <- recipe(score ~ ., data = train) %>%
     update_role(video_id, 
                 video_title, 
                 video_description, 
-                score_raw, 
+                score_raw,
+                tags,
+                url,
+                video_album_query,
+                spotify_artist_name,
+                spotify_artist_id,
+                spotify_album_name,
+                spotify_album_id,
+                # can come back to use release date
+                spotify_album_release_date,
+                track_name,
+                track_id,
+                track_explicit,
                 new_role =  "id") %>% 
     # make score numeric ~ not sure why this has to be done again... recipes quirk
     step_mutate(score = as.numeric(score)) %>% 
     # making duration into seconds rather than 
     step_mutate(duration = as.numeric(duration)) %>% 
-    # the numeric vars really need to be logged
-    step_log(contains("statistic"), duration, base = 10) %>% 
-    # make the tags and text tokens at the word level.
+    # these numeric vars really need to be logged due to their distributions
+    step_log(contains("statistic"), duration, spotify_artist_followers, base = 10) %>% 
+    # make the genres and text tokens at the word level.
     step_tokenize(text) %>% 
     # remove stopwords
     step_stopwords(text) %>% 
-    step_tokenize(tags, token = "regex", options = list(";")) %>% 
+    # tokenize the genres
+    step_tokenize(spotify_artist_genres, token = "regex", options = list(",")) %>% 
     # we'll tune these later
-    step_tokenfilter(tags, max_tokens = 20) %>% 
+    step_tokenfilter(spotify_artist_genres, max_tokens = 20) %>% 
     # we'll tune these later
-    step_tokenfilter(text, max_tokens = tune()) %>% 
-    step_tf(text, tags) %>% 
+    step_tokenfilter(text, max_tokens = 100) %>% 
+    step_tf(text, spotify_artist_genres) %>% 
     # make date
     step_date(published_date, 
               # make lots of features just to see
-              features = c("week", "dow", "month", "year"),
+              features = c("week"),
               keep_original_cols = F)
+
+
+train %>% select(spotify_artist_genres)
+
+recipe(score ~ ., data = train %>% select(score, spotify_artist_genres) %>% 
+         mutate(spotify_artist_genres = str_replace_all(spotify_artist_genres, ", ", "\n"))) %>% 
+  step_tokenize(spotify_artist_genres, token = "lines") %>% 
+  step_tf(spotify_artist_genres) %>% 
+  prep() %>% juice() %>% view()
+```
+
+### PCA and clustering
+
+Can we cluster the different scores together? Does Fantano have a preference?
+
+```{r}
+train_clust <- train %>% select(score, danceability:time_signature)
+
+clust_rec <- recipe(score ~ ., data = train_clust) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  step_pca(all_numeric_predictors())
+
+juiced_clust <- clust_rec %>% prep() %>% juice()
+
+juiced_clust %>% 
+  ggplot(aes(PC1, PC2, colour = score)) +
+  geom_point(alpha = .5) +
+  scale_color_gradient2(low = "blue", high = "red", midpoint = 5)
 
 ```
 
+If we look at each song, it seems not...
+
+What about for the album as a whole?
+
+```{r}
+train %>% 
+  count(video_id)
+
+train_clust_group <- train %>% select(score, video_id, danceability:time_signature) %>% 
+  group_by(video_id) %>% 
+  summarise(across(everything(), median)) %>% 
+  ungroup() %>% 
+  distinct(video_id, .keep_all = T)
+  
+clust_rec_group <- recipe(score ~ ., data = train_clust_group) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  step_pca(all_numeric_predictors(), keep_original_cols = T)
+
+juiced_clust <- clust_rec_group %>% prep() %>% juice()
+
+juiced_clust %>% 
+  ggplot(aes(PC1, PC2, colour = score)) +
+  geom_point(alpha = .5) +
+  scale_color_gradient2(low = "blue", high = "red", midpoint = 5)
+```
+
+What about using UMAP rather than PCA?
+
+```{r}
+library(embed)
+
+umap_rec_group <- recipe(score ~ ., data = train_clust_group) %>% 
+  step_normalize(all_numeric_predictors()) %>% 
+  step_umap(all_numeric_predictors())
+
+juiced_umap <- umap_rec_group %>% prep() %>% juice()
+
+mean_score <- juiced_umap %>% summarise(mean(score, na.rm = T)) %>% as.numeric()
+
+juiced_umap %>% 
+  mutate(mean_score = mean(score)) %>% 
+  ggplot(aes(umap_1, umap_2, colour = score)) +
+  geom_point(alpha = .5) +
+  scale_color_gradient2(low = "blue", high = "red", midpoint = mean_score)
+
+```
+
+
+Next thing we can do is weight each of the variables, perhaps by importance in a logistic regression...
+
+```{r}
+
+set.seed(123)
+spl <- initial_split(train_clust_group, strata = "score")
+
+train <- training(spl)
+test <- testing(spl)
+
+fold_clust_group <- vfold_cv(train_clust_group, v = 5)
+
+log_rec_for_var_imp <- 
+  recipe(score ~ ., data = train_clust_group) %>% 
+  update_role(video_id, new_role = "id") %>% 
+  step_mutate(score = as.numeric(score)) %>% 
+  step_normalize(all_numeric_predictors())
+
+log_rec_for_var_imp %>% prep() %>% juice()
+
+log_rec_for_var_imp_spec <- 
+  linear_reg(penalty = tune(),
+             mixture = 1) %>% 
+  set_mode("regression") %>% 
+  set_engine("glmnet") 
+
+log_rec_for_var_imp_wf <- 
+  workflow() %>% 
+  add_recipe(log_rec_for_var_imp) %>% 
+  add_model(log_rec_for_var_imp_spec) 
+
+log_rec_for_var_imp_grid <- tidyr::crossing(penalty = 10^seq(-6, -1, length.out = 10)) 
+
+log_rec_for_var_imp_tune <- 
+  tune_grid(log_rec_for_var_imp_wf, resamples = fold_clust_group, grid = log_rec_for_var_imp_grid)
+
+log_rec_for_var_imp_tune %>% 
+  autoplot()
+
+log_rec_for_var_imp_tune %>% 
+  collect_metrics()
+
+log_rec_for_var_imp_tune %>% 
+  select_best(metric = "rsq")
+
+log_rec_for_var_imp_workflow_final <- log_rec_for_var_imp_wf %>%
+  finalize_workflow(parameters = select_best(log_rec_for_var_imp_tune, metric = "rsq"))
+```
+
+```{r}
+log_rec_for_var_imp_fit <- log_rec_for_var_imp_workflow_final %>% 
+  fit(test)
+
+fit <- log_rec_for_var_imp_fit %>% pull_workflow_fit()
+
+fit$fit$beta %>% 
+  tidy() %>% 
+  mutate(col = parse_number(column),
+         abs_value = abs(value)) %>% 
+  filter(col == max(col)) %>%
+  slice_max(abs_value, n = 20, with_ties = F) %>% 
+  mutate(row = fct_reorder(row, value)) %>% 
+  ggplot(aes(value, row)) +
+  geom_col() +
+  geom_vline(xintercept = 0, lty = 2)
+
+```
 
 ### Start with a logistic regression model
 
@@ -546,8 +749,10 @@ glmnet_workflow <-
   add_recipe(glmnet_recipe) %>% 
   add_model(glmnet_spec) 
 
-glmnet_grid <- tidyr::crossing(penalty = 10^seq(-6, -1, length.out = 10),
-                               max_tokens = c(200, 500)) 
+# glmnet_grid <- tidyr::crossing(penalty = 10^seq(-6, -1, length.out = 10),
+#                                max_tokens = c(200, 500)) 
+
+glmnet_grid <- tidyr::crossing(penalty = 10^seq(-6, -1, length.out = 10))
 
 glmnet_tune <- 
   tune_grid(glmnet_workflow, resamples = folds, grid = glmnet_grid)
@@ -581,7 +786,7 @@ fit$fit$beta %>%
   mutate(col = parse_number(column),
          abs_value = abs(value)) %>% 
   filter(col == max(col)) %>%
-  slice_max(abs_value, n = 20, with_ties = F) %>% 
+  slice_max(abs_value, n = 50, with_ties = F) %>% 
   mutate(row = fct_reorder(row, value)) %>% 
   ggplot(aes(value, row)) +
   geom_col() +
