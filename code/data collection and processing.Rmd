@@ -512,7 +512,7 @@ df <- df %>%
 ```
 
 ```{r}
-# write_rds(df, "data/nice_nice_nice_data_compress.rds", compress = "gz")
+write_rds(df, "data/nice_nice_nice_data_compress.rds", compress = "gz")
 
 ```
 

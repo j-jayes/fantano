@@ -85,16 +85,43 @@ With ggiraph
 ```{r}
 library(ggiraph)
 
+glue("{spotify_album_name} - Score: {score}")
+
+scatter <- df_mod %>% 
+  mutate(onclick = glue('window.open("{url}")'),
+         caption = spotify_album_name) %>% 
+  ggplot(aes(published_date, score)) +
+  geom_point_interactive(aes(tooltip = caption,
+                             data_id = caption,
+                             onclick = onclick)) +
+  labs(x = "Date of review",
+       y = "Score")
+
+
+int_fig <- girafe(
+  ggobj = scatter,
+  width_svg = 5,
+  height_svg = 3,
+  options = list(
+    # opts_tooltip(css = tooltip_css, delay_mouseover = 0, delay_mouseout = 0),
+    opts_hover(css = "colour: #E69F00; fill-opacity: 1.0; stroke: #E69F00;")
+  )
+)
+
+int_fig
+
 df %>% 
-  mutate(title = str_remove(video_title, "ALBUM REVIEW")) %>% 
-    ggplot(aes(published_date, score, text = glue("{title} - {score}"))) +
-    geom_jitter_interactive(aes(colour = score),
-                width = 0, height = .6, show.legend = FALSE) +
+  mutate(title = str_remove(video_title, "ALBUM REVIEW"),
+         text_ = glue("{title} - {score}")) %>% 
+    ggplot(aes(published_date, score)) +
+    geom_point_interactive(aes(tooltip = text_, 
+                                data_id = text_),
+                na.rm = TRUE) +
     geom_smooth(method = "lm") +
     labs(y = "Album score",
          x = "Review date")
 
-ggplotly(g, tooltip = "text")
+
 
 ```
 
@@ -487,7 +514,7 @@ Third we can try some LDA to see what he has spoken about. have a look at [step 
 Prep for modelling
 
 ```{r}
-df <- read_rds("data/nice_nice_nice_data.rds")
+df <- read_rds("data/nice_nice_nice_data_compress.rds")
 
 df %>% 
   skimr::skim()
