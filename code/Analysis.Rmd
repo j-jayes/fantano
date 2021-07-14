@@ -17,6 +17,10 @@ library(scales)
 theme_set(theme_light())
 ```
 
+# Planning
+
+Still to do - bslib for making things look nice.
+
 ## Purpose
 
 EDA and modelling for Needle Drop Dataset to predict score from words
@@ -24,7 +28,7 @@ EDA and modelling for Needle Drop Dataset to predict score from words
 ### Reading in data
 
 ```{r}
-df <- read_rds("data/nice_nice_nice_data.rds")
+df <- read_rds("data/nice_nice_nice_data_compress.rds")
 
 colnames(df)
 
@@ -64,67 +68,62 @@ A lovely distribution centred around 7/10.
 
 ### Scores over time?
 
-```{r}
-library(plotly)
-
-g <- df %>% 
-  mutate(title = str_remove(video_title, "ALBUM REVIEW")) %>% 
-    ggplot(aes(published_date, score, text = glue("{title} - {score}"))) +
-    geom_jitter(aes(colour = score),
-                width = 0, height = .6, show.legend = FALSE) +
-    geom_smooth(method = "lm") +
-    labs(y = "Album score",
-         x = "Review date")
-
-ggplotly(g, tooltip = "text")
-
-```
-
 With ggiraph
 
 ```{r}
 library(ggiraph)
 
-glue("{spotify_album_name} - Score: {score}")
+gg <- df %>%
+  mutate( # JavaScript call to open website 
+    onclick = sprintf("window.open(\"%s%s\")", "", url),
+    caption = glue("{spotify_artist_name} - {spotify_album_name}\nScore: {score}\n{published_date}")
+  ) %>% 
+  ggplot() +
+  geom_jitter_interactive(
+    aes(x = published_date, 
+        y = score,
+        colour = score,
+        data_id = onclick,
+        tooltip = caption,
+        onclick = onclick),
+    size = 2
+  ) +
+  geom_smooth_interactive(aes(published_date, score)) +
+  scale_color_gradient2(low = "blue",
+                        mid = "pink",
+                        high ="red",
+                        midpoint = 5) +
+  scale_y_continuous(labels = number_format(accuracy = 1)) +
+  theme(legend.position = "none") +
+  labs(x = "Review Published",
+       y = "Album score from \nThe Needle Drop")
 
-scatter <- df_mod %>% 
-  mutate(onclick = glue('window.open("{url}")'),
-         caption = spotify_album_name) %>% 
-  ggplot(aes(published_date, score)) +
-  geom_point_interactive(aes(tooltip = caption,
-                             data_id = caption,
-                             onclick = onclick)) +
-  labs(x = "Date of review",
-       y = "Score")
-
-
-int_fig <- girafe(
-  ggobj = scatter,
-  width_svg = 5,
-  height_svg = 3,
+gg_int <- girafe(
+  ggobj = gg,
+  width_svg = 6,
+  height_svg = 6*0.618,
   options = list(
-    # opts_tooltip(css = tooltip_css, delay_mouseover = 0, delay_mouseout = 0),
     opts_hover(css = "colour: #E69F00; fill-opacity: 1.0; stroke: #E69F00;")
   )
 )
 
-int_fig
-
-df %>% 
-  mutate(title = str_remove(video_title, "ALBUM REVIEW"),
-         text_ = glue("{title} - {score}")) %>% 
-    ggplot(aes(published_date, score)) +
-    geom_point_interactive(aes(tooltip = text_, 
-                                data_id = text_),
-                na.rm = TRUE) +
-    geom_smooth(method = "lm") +
-    labs(y = "Album score",
-         x = "Review date")
-
-
+gg_int
 
 ```
 
+### Search for your faves
+
+```{r}
+library(DT)
+
+df %>% 
+  select(spotify_artist_name, spotify_album_name, spotify_album_release_date, score) %>% 
+  datatable(colnames = c("Artist", "Album", "Released", "Score"),
+            rownames = F)
+
+df %>% 
+  filter()
+```
 
 ### Scores and video statistics?
 
@@ -142,7 +141,7 @@ df %>%
   scale_x_log10(labels = scales::number_format(accuracy = 1)) +
   facet_wrap(~ stat, scales = "free_x") +
   labs(x = NULL,
-       y = NULL,
+       y = "Album score given by Fantano",
        title = "How do viewers of Needle Drop videos respond to different scores?")
 
 ```
@@ -210,6 +209,8 @@ df %>%
        title = "How does review duration relate to score?")
 ```
 
+It certainly seems that albums which score above the average receive longer reviews.
+
 ### Text
 
 What does he say in his reviews?
@@ -226,16 +227,59 @@ words <- words %>%
 
 words %>% 
   count(word, sort = T) %>% 
-  head(100) %>% view()
+  head(100)
 
 words %>% 
   count(word, sort = T) %>% 
   slice_max(n, n = 50, with_ties = F) %>% 
-  mutate(tags = fct_reorder(tags, n)) %>% 
-  ggplot(aes(n, tags, fill = n)) +
+  mutate(word = fct_reorder(word, n)) %>% 
+  ggplot(aes(n, word, fill = n)) +
   geom_col()
 
 ```
+
+Tidy log odds
+
+```{r}
+# tidy_bigrams <- df %>% 
+#   unnest_tokens(bigram, text, token = "ngrams", n = 2) %>% 
+#   select(score, video_title, bigram)
+
+tidy_words <- df %>% 
+  unnest_tokens(word, text) %>% 
+  anti_join(stop_words) %>%
+  select(score, video_title, word)
+
+word_counts <- tidy_words %>%
+     count(video_title, word, sort = TRUE)
+
+library(tidylo)
+
+word_log_odds <- word_counts %>%
+  bind_log_odds(video_title, word, n) 
+
+word_log_odds %>%
+  filter(!is.na(word)) %>% 
+  arrange(-log_odds_weighted) %>% 
+  head(100) %>% view()
+
+```
+
+### Genres
+
+```{r}
+df %>% 
+  unnest_tokens(genre, spotify_artist_genres, token = stringr::str_split, pattern = ", ") %>% 
+  count(genre, sort = T) %>% 
+  head(20)
+
+df %>% 
+  select(spotify_artist_genres)
+```
+
+I want to use the tidy log odds package to see which words are most associated with a particular genre. 
+
+I could collect the most common genres, then to a str_extract from the spotify_artist_genre column and then take the first one?
 
 
 ### Tags
@@ -267,15 +311,6 @@ df %>%
 ### Audio features?
 
 ```{r}
-df <- read_rds("data/audio_features_small.rds")
-
-test_7 <- df %>% nest(data = c(track_name, track_id, track_explicit, danceability, energy, 
-    key, loudness, mode, speechiness, acousticness, instrumentalness, 
-    liveness, valence, tempo, duration_ms, time_signature, spotify_track_features)) %>% 
-  distinct(video_id, .keep_all = T)
-
-
-
 df %>% 
   ggplot(aes(danceability)) +
   geom_density()
@@ -436,68 +471,10 @@ df %>%
 
 
 ```{r}
-df_features <- df %>% 
-  select(score, spotify_artist_popularity, danceability:time_signature) %>% 
-  rename_all(.funs = ~ str_replace_all(.x, "_", " ")) %>%
-  rename_all(.funs = str_to_title) %>% 
-  pivot_longer(-c(Score, `Spotify Artist Popularity`), 
-               names_to = "audio_feature_name", 
-               values_to = "audio_feature_value") %>% 
-  pivot_longer(-c(audio_feature_name, audio_feature_value), 
-               names_to = "music_metric", 
-               values_to = "score_value")
-
-
-
-draw_features_ridges <- function(tbl, feature, metric){
-  
-  tbl <- tbl %>% 
-    filter(audio_feature_name == feature,
-           music_metric == metric) %>% 
-    mutate(score_value = if_else(music_metric == "Spotify Artist Popularity", 
-                                  score_value - score_value %% 10, 
-                                  score_value))
-  
-  mid_point = mean(tbl$score_value)
-  
-  mean_feature_value = round(mean(tbl$audio_feature_value, na.rm = T), 2)
-  
-  tbl %>% 
-    ggplot(aes(audio_feature_value, factor(score_value), fill = score_value)) +
-    geom_density_ridges(show.legend = F) +
-    scale_fill_gradient2(low = "blue", high = "orange", midpoint = mid_point) +
-    geom_vline(xintercept = mean_feature_value, lty = 2) + 
-    labs(y = glue("{metric}"),
-         x = glue("{feature}"),
-         title = glue("How does {feature} relate to {metric}?"),
-         subtitle = glue("Mean {feature} is {mean_feature_value}"))
-  
-}
-
-draw_features_ridges(df_features, "Energy", "Spotify Artist Popularity")
-
-draw_features_ridges(df_features, "Energy", "Score")
-
-```
-
-Crosstalk for a plot that allows selection without shiny
-
-```{r}
-library(crosstalk)
-
-shared_features <- df_features
-
-
-bscols(widths = c(3,NA),
-  list(
-    filter_select("audio_feature_name", "audio_feature_name", shared_features,
-                  ~ifelse(audio_feature_name == 0, "Danceability", "Energy", "Loudness")),
-  ),
-  d3scatter(shared_features, ~audio_feature_value, ~score_value, ~factor(score_value), width="100%", height=250),
-)
 
 
 ```
+
 
 ### Recipe for modelling
 

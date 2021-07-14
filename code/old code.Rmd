@@ -1,0 +1,75 @@
+---
+title: "old code"
+author: "JJayes"
+date: "04/07/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+Plotting different features.
+
+```{r cars}
+df_features <- df %>% 
+  select(score, spotify_artist_popularity, danceability:time_signature) %>% 
+  rename_all(.funs = ~ str_replace_all(.x, "_", " ")) %>%
+  rename_all(.funs = str_to_title) %>% 
+  pivot_longer(-c(Score, `Spotify Artist Popularity`), 
+               names_to = "audio_feature_name", 
+               values_to = "audio_feature_value") %>% 
+  pivot_longer(-c(audio_feature_name, audio_feature_value), 
+               names_to = "music_metric", 
+               values_to = "score_value")
+
+draw_features_ridges <- function(tbl, feature, metric){
+  
+  tbl <- tbl %>% 
+    filter(audio_feature_name == feature,
+           music_metric == metric) %>% 
+    mutate(score_value = if_else(music_metric == "Spotify Artist Popularity", 
+                                  score_value - score_value %% 10, 
+                                  score_value))
+  
+  mid_point = mean(tbl$score_value)
+  
+  mean_feature_value = round(mean(tbl$audio_feature_value, na.rm = T), 2)
+  
+  tbl %>% 
+    ggplot(aes(audio_feature_value, factor(score_value), fill = score_value)) +
+    geom_density_ridges(show.legend = F) +
+    scale_fill_gradient2(low = "blue", high = "orange", midpoint = mid_point) +
+    geom_vline(xintercept = mean_feature_value, lty = 2) + 
+    labs(y = glue("{metric}"),
+         x = glue("{feature}"),
+         title = glue("How does {feature} relate to {metric}?"),
+         subtitle = glue("Mean {feature} is {mean_feature_value}"))
+  
+}
+
+draw_features_ridges(df_features, "Energy", "Spotify Artist Popularity")
+
+draw_features_ridges(df_features, "Energy", "Score")
+
+```
+
+### Plot of score over time
+
+```{r}
+library(plotly)
+
+g <- df %>% 
+  mutate(title = str_remove(video_title, "ALBUM REVIEW")) %>% 
+    ggplot(aes(published_date, score, text = glue("{title} - {score}"))) +
+    geom_jitter(aes(colour = score),
+                width = 0, height = .6, show.legend = FALSE) +
+    geom_smooth(method = "lm") +
+    labs(y = "Album score",
+         x = "Review date")
+
+ggplotly(g, tooltip = "text")
+
+```

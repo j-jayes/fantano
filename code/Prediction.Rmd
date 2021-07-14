@@ -1,0 +1,329 @@
+---
+title: "Prediction"
+author: "JJayes"
+date: "07/07/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+## Purpose
+
+Predicting scores of albums based on the review.
+
+## Planning
+
+I want to do a stacked model with an `xgboost` model for the numeric predictors and a logistic regression model for the text terms because it's much quicker and fine for linear effects.
+
+### Reading in data
+
+```{r}
+df <- read_rds("data/nice_nice_nice_data_compress.rds")
+
+# we have some missing score data so we will filter it out.
+df <- df %>% 
+  filter(!is.na(score))
+
+df <- df %>%
+  group_by(video_id) %>% 
+  mutate(across(track_explicit:time_signature, median)) %>% 
+  ungroup() %>% 
+  distinct(video_id, .keep_all = T)
+
+```
+
+## Modelling prep
+
+Basic data partitioning and creating 5 folds of resampled data to train on.
+
+```{r}
+library(tidymodels)
+
+spl <- initial_split(df)
+
+train <- training(spl)
+test <- testing(spl)
+
+folds <- vfold_cv(train, 5)
+```
+
+
+```{r}
+# library(parallel)
+# library(doParallel)
+# parallel::detectCores()
+# n.cores <- parallel::detectCores() - 2
+# 
+# my.cluster <- parallel::makeCluster(
+#   n.cores, 
+#   type = "PSOCK"
+#   )
+# doParallel::registerDoParallel(cl = my.cluster)
+
+library(doParallel)
+
+# I've chosen 10 here to make use of the processor I have
+cl <- makePSOCKcluster(10)
+registerDoParallel(cl)
+
+clusterEvalQ(cl, {library(tidymodels)})
+```
+
+Because we want to use the stacks package we want to made a grid_control that saves the predictions and workflows to blend the models with.
+
+```{r}
+grid_control <- control_grid(save_pred = T,
+                             save_workflow = T)
+
+```
+
+### Logistic regression model
+
+I want to start with a basic logistic regression model based on categorical data. Penlaized logistic regression can work well here if each category has a linear effect.
+
+```{r}
+library(textrecipes)
+
+train <- train %>% 
+  mutate(spotify_artist_genres = str_replace_all(spotify_artist_genres, ", ", "\n"))
+
+score_words <- c("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
+
+
+log_rec <- recipe(score ~ text + spotify_artist_name + spotify_artist_genres + track_explicit, data = train) %>% 
+    step_mutate(score = as.numeric(score),
+                track_explicit = factor(track_explicit)) %>% 
+    step_tokenize(spotify_artist_genres, token = "lines") %>% 
+    step_tokenize(text) %>% 
+    step_stopwords(text) %>% 
+    step_stopwords(text, custom_stopword_source = score_words) %>% 
+    step_tokenfilter(spotify_artist_genres, max_tokens = 50) %>% 
+    step_tokenfilter(text, max_tokens = tune()) %>% 
+    step_tf(spotify_artist_genres, text) %>% 
+    step_other(spotify_artist_name, threshold = tune()) %>% 
+    step_dummy(all_nominal_predictors())
+
+log_rec %>% prep() %>% juice()
+
+library(tidytext)
+
+# train %>%
+#     select(spotify_artist_genres) %>%
+#     unnest_tokens(genre, spotify_artist_genres, token = stringr::str_split, pattern = "\n") %>%
+#     mutate(genre = str_squish(genre)) %>%
+#     count(genre, sort = T) %>% view
+
+```
+
+```{r}
+# library(usemodels)
+# usemodels::use_glmnet(score ~ ., data = train)
+
+glmnet_recipe <- 
+  log_rec %>% 
+  step_novel(all_nominal_predictors()) %>% 
+  step_nzv(all_predictors())
+
+glmnet_spec <- 
+  linear_reg(penalty = tune(), mixture = 1) %>% 
+  set_mode("regression") %>% 
+  set_engine("glmnet") 
+
+glmnet_workflow <- 
+  workflow() %>% 
+  add_recipe(glmnet_recipe) %>% 
+  add_model(glmnet_spec) 
+
+glmnet_grid <- tidyr::crossing(penalty = 10^seq(-6, -1, length.out = 20),
+                               max_tokens = c(500, 1000, 1500),
+                               threshold = c(.01, .1)) 
+
+glmnet_tune <- 
+  tune_grid(glmnet_workflow, 
+            resamples = folds, 
+            grid = glmnet_grid,
+            control = grid_control)
+```
+
+What does it look like?
+
+```{r}
+glmnet_tune %>% 
+    autoplot() +
+  scale_x_log10(labels = scales::number_format())
+```
+
+What do we learn? 
+
+1000 tokens is the right number, with a lot of regularisation.
+
+```{r}
+fit <- glmnet_workflow %>% 
+    finalize_workflow(select_best(glmnet_tune)) %>% 
+    fit(data = train)
+
+fit <- fit %>% 
+  extract_model() %>% 
+  tidy()
+
+coefs <- fit %>% 
+  filter(lambda >= select_best(glmnet_tune)$penalty) %>% 
+  group_by(term) %>% 
+  slice_max(abs(estimate), n = 1) %>% 
+  ungroup() 
+```
+
+All together
+
+```{r}
+coefs %>% 
+  filter(term != "(Intercept)") %>% 
+  mutate(group = case_when(
+    
+    str_detect(term, "tf_text") ~ "text",
+    str_detect(term, "tf_spotify_artist_genres") ~ "genre",
+    TRUE ~ "other"
+    
+  )) %>% 
+  group_by(group) %>% 
+  slice_max(abs(estimate), n = 30) %>%
+  ungroup() %>% 
+  mutate(term = fct_reorder(term, estimate)) %>% 
+  ggplot(aes(estimate, term)) +
+  geom_point() +
+  facet_wrap(~ group, scales = "free_y", nrow = 2)
+
+```
+
+What do we learn?
+
+The words that have the biggest positive impact are "eight", "8", "7", "seven"... so we really should remove these.
+
+The words that lower score include "three" "four", "five".
+
+Other nice findings are:
+
+gorgeous, fantastic, dense, powerful, 
+
+### SVM model
+
+```{r}
+svm_rec <- recipe(score ~ text + spotify_artist_name + spotify_artist_genres + track_explicit, data = train) %>% 
+    step_mutate(score = as.numeric(score),
+                track_explicit = factor(track_explicit)) %>% 
+    step_tokenize(spotify_artist_genres, token = "lines") %>% 
+    step_tokenize(text) %>% 
+    step_stopwords(text) %>% 
+    step_stopwords(text, custom_stopword_source = score_words) %>% 
+    step_tokenfilter(spotify_artist_genres, max_tokens = 50) %>% 
+    step_tokenfilter(text, max_tokens = 1000) %>% 
+    step_tf(spotify_artist_genres, text) %>% 
+    step_other(spotify_artist_name, threshold = 0.01) %>% 
+    step_dummy(all_nominal_predictors())
+
+
+
+svm_spec <- svm_linear(cost = tune(),
+                       margin = tune()) %>%
+  set_mode("regression") %>%
+  set_engine("LiblineaR")
+
+svm_workflow <- 
+  workflow() %>% 
+  add_recipe(svm_rec) %>% 
+  add_model(svm_spec) 
+
+svm_grid <- grid_regular(parameters(svm_spec))
+
+svm_tune <- 
+  tune_grid(svm_workflow, 
+            resamples = folds, 
+            grid = svm_grid,
+            control = grid_control)
+```
+
+```{r}
+svm_tune %>% autoplot()
+
+fit <- svm_workflow %>% 
+  finalize_workflow(select_best(svm_tune)) %>% 
+  fit(train)
+
+fit %>% 
+  pull_workflow_fit() %>% tidy() %>% 
+  slice_max(abs(estimate), n = 40) %>% 
+  filter(term != "Bias") %>% 
+  mutate(term = fct_reorder(term, estimate)) %>% 
+  ggplot(aes(estimate, term)) +
+  geom_point()
+```
+
+SVM is pretty poor - not as good as the penalized regression model above
+
+### xgboost model
+
+```{r}
+xg_rec <- recipe(score ~ video_statistics_view_count +
+                   video_statistics_like_count + 
+                   video_statistics_dislike_count +
+                   video_statistics_comment_count +
+                   duration +
+                   spotify_album_n_tracks + 
+                   spotify_artist_popularity + 
+                   spotify_artist_followers + 
+                   danceability + 
+                   energy + 
+                   key + 
+                   loudness + 
+                   mode + 
+                   speechiness + 
+                   acousticness + 
+                   instrumentalness +
+                   liveness + 
+                   valence + 
+                   tempo + 
+                   duration_ms + 
+                   time_signature, data = train) %>% 
+  step_filter(!is.na(danceability)) %>% 
+  step_log(video_statistics_view_count,
+           video_statistics_like_count,
+           video_statistics_dislike_count,
+           video_statistics_comment_count) %>% 
+  step_mutate(duration = as.numeric(duration)) %>% 
+  step_novel(all_nominal_predictors()) %>% 
+  step_dummy(all_nominal_predictors(), one_hot = TRUE) %>% 
+  step_nzv(all_predictors())
+
+# xg_rec %>% prep %>% juice() %>% view()
+
+```
+
+
+```{r}
+xg_spec <- 
+  boost_tree(trees = tune(), min_n = tune(), tree_depth = tune(), learn_rate = tune()) %>% 
+  set_mode("regression") %>% 
+  set_engine("xgboost")
+
+xg_workflow <- 
+  workflow() %>% 
+  add_recipe(xg_rec) %>% 
+  add_model(xg_spec) 
+
+xg_grid <- crossing(trees = c(100, 1000, 2000),
+                    min_n = c(2, 5, 21),
+                    tree_depth = c(1, 8, 15),
+                    learn_rate = c(0.0000000001, 0.00000316, 0.1))
+
+set.seed(2021)
+xg_tune <- tune_grid(xg_workflow, 
+            resamples = folds, 
+            control = grid_control,
+            grid = xg_grid)
+
+
+```
+

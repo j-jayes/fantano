@@ -1,0 +1,81 @@
+---
+title: "Untitled"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(tidyverse)
+library(ggridges)
+library(glue)
+
+theme_set(theme_light())
+
+df <- read_rds("audio_features.rds")
+```
+
+
+```{r function, include=FALSE}
+draw_features_ridges <- function(tbl){
+
+  tbl <- tbl %>%
+    filter(audio_feature_name == input$af_name,
+           music_metric == input$mm) %>%
+    mutate(score_value = if_else(music_metric == "Spotify Artist Popularity",
+                                  score_value - score_value %% 10,
+                                  score_value))
+
+  mid_point = mean(tbl$score_value)
+
+  mean_feature_value = round(mean(tbl$audio_feature_value, na.rm = T), 2)
+
+  tbl %>%
+    ggplot(aes(audio_feature_value, factor(score_value), fill = score_value)) +
+    geom_density_ridges(show.legend = F) +
+    scale_fill_gradient2(low = "blue", high = "orange", midpoint = mid_point) +
+    geom_vline(xintercept = mean_feature_value, lty = 2) +
+    labs(y = glue("{input$mm}"),
+         x = glue("{input$af_name}"),
+         title = glue("How does {input$af_name} relate to {input$mm}?"),
+         subtitle = glue("Mean {input$af_name} is {mean_feature_value}"))
+
+}
+
+```
+
+Column {data-width=350}
+-----------------------------------------------------------------------
+
+### Inputs
+
+```{r}
+
+selectizeInput("af_name",
+               label = "Select Audio Feature",
+               choices = unique(df$audio_feature_name),
+               selected = "Danceability",
+               multiple = F)
+
+selectizeInput("mm",
+               label = "Select Audio Feature",
+               choices = unique(df$music_metric),
+               selected = "Score",
+               multiple = F)
+
+```
+
+Column {data-width=650}
+-----------------------------------------------------------------------
+
+### Figure
+
+```{r}
+renderPlot({draw_features_ridges(df)})
+```
+
+
