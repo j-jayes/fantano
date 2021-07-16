@@ -25,13 +25,17 @@ df <- read_rds("data/nice_nice_nice_data_compress.rds")
 
 # we have some missing score data so we will filter it out.
 df <- df %>% 
-  filter(!is.na(score))
+  filter(!is.na(score)) %>% 
+  mutate(score = as.numeric(score))
 
 df <- df %>%
   group_by(video_id) %>% 
-  mutate(across(track_explicit:time_signature, median)) %>% 
+  mutate(across(track_explicit:time_signature, c(median, sd))) %>% 
   ungroup() %>% 
-  distinct(video_id, .keep_all = T)
+  distinct(video_id, .keep_all = T) %>% 
+  rename_with(~ str_replace_all(.x, "_1", "_median"), contains("_1")) %>% 
+  rename_with(~ str_replace_all(.x, "_2", "_sd"), contains("_2")) %>% 
+  mutate(spotify_artist_genres = str_replace_all(spotify_artist_genres, ", ", "\n"))
 
 ```
 
@@ -87,15 +91,10 @@ I want to start with a basic logistic regression model based on categorical data
 ```{r}
 library(textrecipes)
 
-train <- train %>% 
-  mutate(spotify_artist_genres = str_replace_all(spotify_artist_genres, ", ", "\n"))
-
 score_words <- c("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten")
 
-
 log_rec <- recipe(score ~ text + spotify_artist_name + spotify_artist_genres + track_explicit, data = train) %>% 
-    step_mutate(score = as.numeric(score),
-                track_explicit = factor(track_explicit)) %>% 
+    step_mutate(track_explicit = factor(track_explicit)) %>% 
     step_tokenize(spotify_artist_genres, token = "lines") %>% 
     step_tokenize(text) %>% 
     step_stopwords(text) %>% 
@@ -107,14 +106,6 @@ log_rec <- recipe(score ~ text + spotify_artist_name + spotify_artist_genres + t
     step_dummy(all_nominal_predictors())
 
 log_rec %>% prep() %>% juice()
-
-library(tidytext)
-
-# train %>%
-#     select(spotify_artist_genres) %>%
-#     unnest_tokens(genre, spotify_artist_genres, token = stringr::str_split, pattern = "\n") %>%
-#     mutate(genre = str_squish(genre)) %>%
-#     count(genre, sort = T) %>% view
 
 ```
 
@@ -266,6 +257,8 @@ SVM is pretty poor - not as good as the penalized regression model above
 ### xgboost model
 
 ```{r}
+library(embed)
+
 xg_rec <- recipe(score ~ video_statistics_view_count +
                    video_statistics_like_count + 
                    video_statistics_dislike_count +
@@ -274,37 +267,33 @@ xg_rec <- recipe(score ~ video_statistics_view_count +
                    spotify_album_n_tracks + 
                    spotify_artist_popularity + 
                    spotify_artist_followers + 
-                   danceability + 
-                   energy + 
-                   key + 
-                   loudness + 
-                   mode + 
-                   speechiness + 
-                   acousticness + 
-                   instrumentalness +
-                   liveness + 
-                   valence + 
-                   tempo + 
-                   duration_ms + 
-                   time_signature, data = train) %>% 
-  step_filter(!is.na(danceability)) %>% 
+                   track_explicit_sd + danceability_sd + energy_sd + key_sd + loudness_sd + mode_sd + speechiness_sd + acousticness_sd + instrumentalness_sd + liveness_sd + valence_sd + tempo_sd + duration_ms_sd + time_signature_sd + 
+                   track_explicit_median + danceability_median + energy_median + key_median + loudness_median + mode_median + speechiness_median + acousticness_median + instrumentalness_median + liveness_median + valence_median + tempo_median + duration_ms_median + time_signature_median
+                 , data = train) %>% 
+  step_filter(!is.na(danceability_sd)) %>% 
+  # creating a new feature: dislike count as ratio to view count
+  step_mutate(dislike_to_view_ratio = video_statistics_dislike_count / video_statistics_view_count) %>% 
   step_log(video_statistics_view_count,
            video_statistics_like_count,
            video_statistics_dislike_count,
-           video_statistics_comment_count) %>% 
+           video_statistics_comment_count,
+           # log new var also
+           dislike_to_view_ratio) %>% 
   step_mutate(duration = as.numeric(duration)) %>% 
+  step_pca(track_explicit_median, danceability_median, energy_median, key_median, loudness_median, mode_median, speechiness_median, acousticness_median, instrumentalness_median, liveness_median, valence_median, tempo_median, duration_ms_median, time_signature_median, track_explicit_sd, danceability_sd, energy_sd, key_sd, loudness_sd, mode_sd, speechiness_sd, acousticness_sd, instrumentalness_sd, liveness_sd, valence_sd, tempo_sd, duration_ms_sd, time_signature_sd, num_comp = tune()) %>%
   step_novel(all_nominal_predictors()) %>% 
   step_dummy(all_nominal_predictors(), one_hot = TRUE) %>% 
   step_nzv(all_predictors())
 
-# xg_rec %>% prep %>% juice() %>% view()
-
+xg_rec %>% prep() %>% juice() %>% view()
+#   ggplot(aes(umap_1, umap_2, colour = factor(score))) +
+#   geom_point()
 ```
 
 
 ```{r}
 xg_spec <- 
-  boost_tree(trees = tune(), min_n = tune(), tree_depth = tune(), learn_rate = tune()) %>% 
+  boost_tree(trees = tune(), mtry = tune(), learn_rate = tune()) %>% 
   set_mode("regression") %>% 
   set_engine("xgboost")
 
@@ -313,10 +302,10 @@ xg_workflow <-
   add_recipe(xg_rec) %>% 
   add_model(xg_spec) 
 
-xg_grid <- crossing(trees = c(100, 1000, 2000),
-                    min_n = c(2, 5, 21),
-                    tree_depth = c(1, 8, 15),
-                    learn_rate = c(0.0000000001, 0.00000316, 0.1))
+xg_grid <- crossing(trees = c(500, 1000, 2000),
+                    mtry = c(4, 5, 6),
+                    learn_rate = c(0.01, 0.005),
+                    num_comp = c(4, 6, 8))
 
 set.seed(2021)
 xg_tune <- tune_grid(xg_workflow, 
@@ -324,6 +313,90 @@ xg_tune <- tune_grid(xg_workflow,
             control = grid_control,
             grid = xg_grid)
 
+```
+
+What does it look like??
+
+```{r}
+xg_tune %>% autoplot()
+
+xg_fit <- xg_workflow %>% 
+  finalize_workflow(select_best(xg_tune, metric = "rmse")) %>% 
+  fit(train)
+
+model_fit <- xgboost::xgb.importance(model = extract_model(xg_fit))
+
+model_fit %>% as_tibble() %>% 
+  mutate(Feature = fct_reorder(Feature, Gain)) %>% 
+  ggplot(aes(Gain, Feature)) +
+  geom_col()
+```
+
+
+## Stacks package to make an ensemble model
+
+```{r}
+library(stacks)
+
+fantano_stack <- 
+  stacks() %>% 
+  add_candidates(xg_tune) %>% 
+  add_candidates(glmnet_tune)
+
+fantano_stack_blended <- fantano_stack %>% 
+  blend_predictions()
+
+autoplot(fantano_stack_blended, type = "weights")
+
+fantano_stack_fitted <-
+  fantano_stack_blended %>%
+  fit_members()
+```
+
+Which model configurations were assigned??
+
+```{r}
+collect_parameters(fantano_stack_fitted, "glmnet_tune") %>% arrange(desc(coef))
+```
+
+Now we can fit on the testing data
+
+```{r}
+fantano_test <- 
+  test %>%
+  bind_cols(predict(fantano_stack_fitted, .))
+
+fantano_test %>% 
+  select(video_title, score, .pred) %>% 
+  DT::datatable()
+```
+
+
+```{r}
+fantano_test %>% 
+  ggplot(aes(score, .pred)) +
+  geom_jitter() +
+  geom_smooth()
+
+fantano_test %>% 
+  rsq(score, .pred)
+
+fantano_test %>% 
+  rmse(score, .pred)
+```
+
+Where do the predictions lie in comparison to the score?
+
+```{r}
+fantano_test %>% 
+  select(.pred, score) %>%
+  pivot_longer(names_to = "type", cols = everything()) %>% 
+  ggplot(aes(value, fill = type)) +
+  geom_density(alpha = .5)
+
+# lets save the predictions
+
+# fantano_test %>% write_rds("data/predictions_stack_1.rds")
 
 ```
 
