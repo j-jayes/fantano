@@ -1,0 +1,91 @@
+---
+title: "PCA"
+author: "JJayes"
+date: "15/07/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+```{r}
+df <- read_rds("data/nice_nice_nice_data_compress.rds")
+
+# we have some missing score data so we will filter it out.
+df <- df %>% 
+  filter(!is.na(score))
+
+```
+
+
+```{r}
+library(tidytext)
+
+genres <- df %>% 
+    mutate(spotify_artist_genres = str_replace_all(spotify_artist_genres, ", ", "\n")) %>% 
+    unnest_tokens(output = genre, input = spotify_artist_genres, token = "lines") %>% 
+    select(genre)
+
+genres %>% count(genre, sort = T) %>% head(20)
+
+```
+
+Top 6 Genres are: rap, hip hop, indie rock, art pop, modern rock, freak folk.
+
+```{r}
+genres %>% 
+    filter(str_detect(genre, "\\brap\\b")) %>% 
+    count(genre, sort = T)
+```
+
+Function to find the number of genres with this in the title.
+
+```{r}
+count_genres <- function(input){
+    
+    number <- genres %>% 
+        filter(str_detect(genre, glue::glue("\\b{input}\\b"))) %>% 
+        count() %>% as.integer()
+    
+    genres %>% 
+        filter(str_detect(genre, glue::glue("\\b{input}\\b"))) %>% 
+        count(genre, sort = T) %>% 
+        mutate(query = glue::glue("{input}"),
+               nn = number)
+    
+}
+
+# test
+# count_genres("rap")
+```
+
+```{r}
+top_genres <- c("rap", "hip hop", "rock", "pop", "folk", "electronic", "metal", "jazz")
+
+map(top_genres, count_genres)
+```
+
+Extract top genres from long list
+
+# str_extract(spotify_artist_genres, glue::glue("\\b{input}\\b")))
+
+```{r}
+extract_top_genre <- function(input){
+    
+    input_enq <- enquo(input)
+    
+    df %>%
+        head(10) %>%
+        mutate(top_genre = str_detect(spotify_artist_genres, !!input_enq)) %>% 
+        rename_with(~ str_c(.x, glue::glue("_{input}")), top_genre)
+
+}
+
+extract_top_genre(df %>% head(), "rap")
+
+map(top_genres, extract_top_genre) %>% view()
+
+```
+

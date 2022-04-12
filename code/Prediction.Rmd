@@ -105,7 +105,7 @@ log_rec <- recipe(score ~ text + spotify_artist_name + spotify_artist_genres + t
     step_other(spotify_artist_name, threshold = tune()) %>% 
     step_dummy(all_nominal_predictors())
 
-log_rec %>% prep() %>% juice()
+juiced <- log_rec %>% prep() %>% juice()
 
 ```
 
@@ -199,42 +199,8 @@ Other nice findings are:
 
 gorgeous, fantastic, dense, powerful, 
 
-### SVM model
+### Catboost rec
 
-```{r}
-svm_rec <- recipe(score ~ text + spotify_artist_name + spotify_artist_genres + track_explicit, data = train) %>% 
-    step_mutate(score = as.numeric(score),
-                track_explicit = factor(track_explicit)) %>% 
-    step_tokenize(spotify_artist_genres, token = "lines") %>% 
-    step_tokenize(text) %>% 
-    step_stopwords(text) %>% 
-    step_stopwords(text, custom_stopword_source = score_words) %>% 
-    step_tokenfilter(spotify_artist_genres, max_tokens = 50) %>% 
-    step_tokenfilter(text, max_tokens = 1000) %>% 
-    step_tf(spotify_artist_genres, text) %>% 
-    step_other(spotify_artist_name, threshold = 0.01) %>% 
-    step_dummy(all_nominal_predictors())
-
-
-
-svm_spec <- svm_linear(cost = tune(),
-                       margin = tune()) %>%
-  set_mode("regression") %>%
-  set_engine("LiblineaR")
-
-svm_workflow <- 
-  workflow() %>% 
-  add_recipe(svm_rec) %>% 
-  add_model(svm_spec) 
-
-svm_grid <- grid_regular(parameters(svm_spec))
-
-svm_tune <- 
-  tune_grid(svm_workflow, 
-            resamples = folds, 
-            grid = svm_grid,
-            control = grid_control)
-```
 
 ```{r}
 svm_tune %>% autoplot()
