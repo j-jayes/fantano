@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(httr)
 library(glue)
-
+library(jsonlite)
 ```
 
 # Purpose
@@ -124,6 +124,7 @@ Function to get data about the video from the API.
 video_id <- "Ppn7Km1v7pA"
 
 get_video_data <- function(video_id){
+  message("Getting data from ", video_id)
   
   base <- "https://www.googleapis.com/youtube/v3/"
   
@@ -180,12 +181,36 @@ album_reviews <- album_reviews %>%
   select(-snippet.title) %>% 
   unnest(video_data)
 
-# write_rds(album_reviews, "data/album_reviews_raw_added_tags.rds")
+# write_rds(album_reviews, "data/album_reviews_raw_added_tags_2.rds")
+
+# album_reviews %>%
+#   # filter(contentDetails.caption == "true") %>%
+#   select(video_id) %>%
+#   write.csv("data/video_ids_2022.csv")
+
 ```
 
 ### Transcripts
 
 I moved to python to get the transcripts and join them together. I'll link the jupyter notebook here at some point. It's a bit janky.
+
+Maybe I try with another package in R
+
+```{r}
+library("youtubecaption")
+
+album_reviews <- readRDS("data/album_reviews_raw_added_tags_2.rds")
+
+captions <- album_reviews %>% 
+  select(video_id)
+
+captions_head <- captions %>% 
+  head()
+
+captions_head %>% 
+  mutate(caption = get_caption(video_id))
+```
+
 
 ### Reading in data for processing
 
@@ -197,6 +222,7 @@ tbl <- tbl %>%
            snippet.title,
            snippet.publishedAt,
            snippet.description,
+           snippet.thumbnails.standard.url,
            contentDetails.duration,
            starts_with("statistics"),
            tags,
@@ -241,7 +267,7 @@ tbl <- tbl %>%
 tbl <- tbl %>% 
   mutate(tags = str_remove_all(tags, "rvwz"))
 
-# write_rds(tbl, "data/clean_data_1_july.rds")
+# write_rds(tbl, "data/clean_data_no_transcript_3_June.rds")
 ```
 
 ### Now i want to get the data from the spotify API about the music.
@@ -539,4 +565,25 @@ df <- df %>% nest(data = c(track_name, track_id, track_explicit, danceability, e
 write_rds(test_1, "data/audio_features_small.rds")
 
 ```
+
+
+### Getting images of thumbnails
+
+```{r}
+df <- read_rds("data/nice_nice_nice_data_compress.rds")
+
+colnames(df)
+
+# we have some missing score data so we will filter it out.
+df <- df %>% 
+  filter(!is.na(score))
+
+df <- df %>%
+  group_by(video_id) %>% 
+  mutate(across(track_explicit:time_signature, median)) %>% 
+  ungroup() %>% 
+  distinct(video_id, .keep_all = T)
+
+```
+
 

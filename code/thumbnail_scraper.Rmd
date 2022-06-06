@@ -1,0 +1,48 @@
+---
+title: "Images"
+output: html_document
+---
+
+## Purpose
+
+Download the thumbnails to try and analyse for some relationship between score and flanel colour
+
+```{r}
+library(tidyverse)
+
+df <- read_rds("data/clean_data_no_transcript_3_June.rds")
+
+df <- df %>% 
+    select(video_id, video_thumbnails_standard_url)
+```
+
+
+Function to get the photos
+
+Testing
+
+```{r}
+url <- "https://i.ytimg.com/vi/DTsUahG-6us/sddefault.jpg"
+video_id <- "DTsUahG-6us"
+
+download.file(url, destfile = glue::glue("images/{video_id}.jpg"), mode = "wb")
+```
+
+```{r}
+get_image <- function(video_id, image_url){
+    
+    download.file(image_url, destfile = glue::glue("images/thumb_{video_id}.jpg"), mode = "wb")
+
+}
+
+get_image("DTsUahG-6us", "https://i.ytimg.com/vi/DTsUahG-6us/sddefault.jpg")
+```
+
+## Use it
+
+```{r}
+df %>% 
+    filter(!is.na(video_thumbnails_standard_url)) %>% 
+    mutate(image = purrr::pmap(list(video_id, video_thumbnails_standard_url), get_image))
+```     
+

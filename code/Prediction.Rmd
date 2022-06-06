@@ -182,6 +182,7 @@ coefs %>%
   group_by(group) %>% 
   slice_max(abs(estimate), n = 30) %>%
   ungroup() %>% 
+  filter(group == "text") %>% 
   mutate(term = fct_reorder(term, estimate)) %>% 
   ggplot(aes(estimate, term)) +
   geom_point() +
