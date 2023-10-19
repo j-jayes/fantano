@@ -1,0 +1,177 @@
+---
+title: "Transcripts"
+format: html
+---
+
+## Purpose
+
+Get the transcripts from the Needledrop videos
+
+### Get data
+
+```{r}
+library(tidyverse)
+
+df <- read_rds("data/nice_nice_nice_data_compress.rds")
+
+videos <- df %>%
+    distinct(video_id)
+```
+
+
+
+```{python}
+!pip install youtube_transcript_api
+from youtube_transcript_api import YouTubeTranscriptApi
+!pip install pandas
+import pandas as pd
+!pip install tqdm
+from tqdm import tqdm
+import json
+
+
+```
+
+
+```{python}
+class YTtranscripts:
+    def __init__(self, videos, transcripts):
+        self.videos = pd.DataFrame(r.videos)
+        self.transcripts = None
+        
+    def get_transcripts(self, videos):
+        for video_id in tqdm(videos):
+            transcript = self.get_individual_transcript(video_id)
+            videos[video_id].update(transcript)
+    
+    self.transcripts = videos
+    return videos
+        
+    def get_individual_transcript(self, video_id):
+        try:
+            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+            transcript = pd.DataFrame(transcript)
+            transcript = transcript["text"]
+            
+        except:
+            print("Error getting individual video")
+        
+        return transcript
+        videos[video_id].update(transcript)
+
+    def dump(self):
+        if self.transcripts is None:
+            print("data is none")
+            return
+        
+        file_name = "test" + ".json"
+        with open(file_name, "w") as f:
+            json.dump(transcripts, f, indent = 4)
+            
+        print("File dumped")
+```
+
+
+```{python}
+class YTtranscripts:
+    def __init__(self, videos):
+        self.videos = pd.DataFrame(r.videos)
+        self.transcripts = None
+        
+    def get_transcripts(self, videos):
+        for video_id in tqdm(videos):
+            try:
+                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['en'])
+                transcript = pd.DataFrame(transcript)
+                transcript = transcript["text"]
+                
+            except:
+                print("Error getting individual video")
+    
+    self.transcripts = videos
+    return videos
+
+    def dump(self):
+        if self.transcripts is None:
+            print("data is none")
+            return
+        
+        transcripts = transcripts
+        
+        file_name = "test" + ".json"
+        with open(file_name, "w") as f:
+            json.dump(transcripts, f, indent = 4)
+            
+        print("File dumped")
+
+
+```
+
+
+```{python}
+df = r.videos
+
+df = pd.DataFrame(df)
+
+videos = df['video_id'][20:25]
+
+for video in videos:
+    try:
+        print(video)
+    except:
+        print("error")
+```
+
+
+```{python}
+from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api.formatters import JSONFormatter
+
+# Must be a single transcript.
+transcript = YouTubeTranscriptApi.get_transcript(video_id)
+
+formatter = JSONFormatter()
+
+# .format_transcript(transcript) turns the transcript into a JSON string.
+json_formatted = formatter.format_transcript(transcript)
+
+
+# Now we can write it out to a file.
+with open('your_filename.json', 'w', encoding='utf-8') as json_file:
+    json_file.write(json_formatted)
+
+# Now should have a new JSON file that you can easily read back into Python.
+
+```
+
+
+One more time
+
+```{python}
+from youtube_transcript_api import YouTubeTranscriptApi
+ 
+videos_list = ["6kWWLOampOM", "lCIveUzyIyI"]
+ 
+for i in videos_list 
+
+    # using the srt variable with the list of dictonaries
+    # obtained by the the .get_transcript() function
+    try:
+        srt = YouTubeTranscriptApi.get_transcript(f"{i}", languages=['en'])
+    except:
+        srt = ["An exception occurred"]
+    
+    
+     
+        # creating or overwriting a file "subtitles.txt" with
+        # the info inside the context manager
+        with open(f"{i}.txt", "w") as f:
+           
+                # iterating through each element of list srt
+            for j in srt:
+                # writing each element of srt on a new line
+                f.write("{}\n".format(j))
+            
+
+```
+
