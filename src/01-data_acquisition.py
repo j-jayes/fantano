@@ -6,12 +6,12 @@ import time
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from dotenv import load_dotenv
+import hashlib
 
 load_dotenv()
 
 # API Key
 API_KEY = os.environ.get("YOUTUBE_DATA_API_KEY")
-
 
 # Permissions
 API_SERVICE_NAME = 'youtube'
@@ -20,10 +20,20 @@ API_VERSION = 'v3'
 def get_authenticated_service():
     return build(API_SERVICE_NAME, API_VERSION, developerKey=API_KEY)
 
+# Function to compute the checksum for a video ID
+def compute_checksum(video_id):
+    return hashlib.sha256(video_id.encode()).hexdigest()
+
+# Function to check if the video is new based on checksum
+def is_video_new(video_id, checksum_record):
+    checksum = compute_checksum(video_id)
+    return checksum not in checksum_record
+
+
 def get_video_data(youtube, playlist_id):
     page_token = None
     all_video_data = []
-    cache_file = 'cache.pkl'
+    cache_file = 'data/cache/cache.pkl'
 
     try:
         with open(cache_file, 'rb') as f:
@@ -72,17 +82,35 @@ def main():
     start_date = "2010-03-08T00:00:00Z"
     end_date = datetime.datetime.utcnow().isoformat() + 'Z'
 
+    # Load or initialize the checksum record
+    checksum_file = 'data/checksums.txt'
     try:
-        video_data = get_video_data(youtube, playlist_id)
+        with open(checksum_file, 'r') as f:
+            existing_checksums = {line.strip() for line in f}
+    except FileNotFoundError:
+        existing_checksums = set()
+
+    try:
+        all_video_data = get_video_data(youtube, playlist_id)
+
+        # Filter for new videos based on checksums
+        new_video_data = [video for video in all_video_data if is_video_new(video['id'], existing_checksums)]
+        
+        # Update the checksums file with new video IDs
+        with open(checksum_file, 'a') as f:
+            for video in new_video_data:
+                f.write(compute_checksum(video['id']) + '\n')
+
     finally:
-        if os.path.exists('cache.pkl'):
-            os.remove('cache.pkl')
+        if os.path.exists('data/cache/cache.pkl'):
+            os.remove('data/cache/cache.pkl')
 
     os.makedirs('data/raw', exist_ok=True)
     filename = f"data/raw/video_data_{start_date}_to_{end_date}.json"
 
+    # Save only new video data
     with open(filename, 'w') as f:
-        json.dump(video_data, f, indent=4)
+        json.dump(new_video_data, f, indent=4)
 
 if __name__ == '__main__':
     main()
