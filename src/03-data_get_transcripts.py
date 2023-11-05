@@ -7,7 +7,7 @@ def get_transcript(video_id):
     try:
         # Fetch the transcript using the video ID
         transcript = YouTubeTranscriptApi.get_transcript(video_id)
-        print(f"Transcript for video ID {video_id} has been fetched successfully.")
+        print(f"Transcript for video ID {video_id} has been fetched successfully.", flush=True)
         return transcript
     except TranscriptsDisabled:
         print(f"Transcript is disabled for video ID {video_id}.")
