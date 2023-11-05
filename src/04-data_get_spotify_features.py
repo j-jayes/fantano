@@ -67,7 +67,7 @@ def main():
             output_file = f'{spotify_features_dir}/{video_id}.json'
             # Check if the Spotify features file already exists
             if os.path.exists(output_file):
-                print(f"Spotify features file for video ID {video_id} already exists. Skipping.")
+                print(f"Spotify features file for video ID {video_id} already exists. Skipping.", flush=True)
                 continue  # Skip to next video if file exists
             # Modify title to remove " ALBUM REVIEW" or " album review"
             title = video['snippet']['title'].replace(" ALBUM REVIEW", "").replace(" album review", "")
