@@ -95,7 +95,7 @@ def main():
                 try:
                     with open(output_file, 'w') as outfile:
                         json.dump(album_data, outfile)
-                    print(f"Saved Spotify data, audio features, and artist information for video ID {video_id} to {output_file}")
+                    print(f"Saved Spotify data, audio features, and artist information for video ID {video_id} to {output_file}", flush=True)
                 except Exception as e:
                     print(f"Error saving file {output_file}: {e}")
             else:
