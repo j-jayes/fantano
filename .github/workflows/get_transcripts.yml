@@ -1,9 +1,9 @@
 name: Get transcripts
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - get_transcripts
 
 jobs:
   get_transcripts:
