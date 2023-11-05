@@ -34,7 +34,7 @@ jobs:
         run: |
             python src/04-data_get_spotify_features.py &
             SCRIPT_PID=$!
-            sleep 90  # Wait
+            sleep 100  # Wait
             kill $SCRIPT_PID
 
       - name: Commit files
