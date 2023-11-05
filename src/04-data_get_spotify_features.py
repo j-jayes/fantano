@@ -20,17 +20,33 @@ if not os.path.exists(spotify_features_dir):
 sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=os.environ['SPOTIFY_CLIENT_ID'],
                                                            client_secret=os.environ['SPOTIFY_SECRET']))
 
-def get_album_tracks(album_id):
-    """Fetch tracks of an album by its Spotify ID"""
+def get_album_tracks(album_id, artist_id):
+    """Fetch tracks and their audio features of an album by its Spotify ID, and artist information"""
     try:
         tracks = []
         album_tracks = sp.album_tracks(album_id)
+        artist_info = sp.artist(artist_id)
+        artist_data = {
+            'popularity': artist_info['popularity'],
+            'followers': artist_info['followers']['total'],
+            'genres': artist_info['genres'],
+            'images': artist_info['images'],
+            'external_urls': artist_info['external_urls'],
+            'spotify_uri': artist_info['uri'],
+            'spotify_url': artist_info['external_urls']['spotify']
+        }
         for track in album_tracks['items']:
-            tracks.append(track)
-        return tracks
+            track_info = {
+                'name': track['name'],
+                'id': track['id'],
+                'audio_features': sp.audio_features(track['id'])[0]
+            }
+            tracks.append(track_info)
+        return tracks, artist_data
     except Exception as e:
-        print(f"Error fetching tracks for album {album_id}: {e}")
-        return None
+        print(f"Error fetching tracks, audio features, or artist information for album {album_id}: {e}")
+        return None, None
+
 
 def main():
     # Loop through all JSON files in processed_dir
@@ -65,21 +81,25 @@ def main():
             if result['albums']['items']:
                 album = result['albums']['items'][0]
                 album_id = album['id']
-                # Get the tracks of the album
-                tracks = get_album_tracks(album_id)
-                if tracks is None:
+                artist_id = album['artists'][0]['id']  # Assuming the first artist is the main artist
+                # Get the tracks of the album and artist information
+                tracks, artist_data = get_album_tracks(album_id, artist_id)
+                if tracks is None or artist_data is None:
                     continue  # Skip to next video on error
-                # Save the tracks data to spotify_features_dir with the video ID in the filename
+                # Save the tracks data along with their audio features and artist information
+                # to spotify_features_dir with the video ID in the filename
+                album_data = {
+                    'tracks': tracks,
+                    'artist_info': artist_data
+                }
                 try:
                     with open(output_file, 'w') as outfile:
-                        json.dump(tracks, outfile)
-                    print(f"Saved Spotify data for video ID {video_id} to {output_file}")
+                        json.dump(album_data, outfile)
+                    print(f"Saved Spotify data, audio features, and artist information for video ID {video_id} to {output_file}")
                 except Exception as e:
                     print(f"Error saving file {output_file}: {e}")
             else:
                 print(f"No albums found on Spotify for search term: {title}")
 
-
 if __name__ == '__main__':
     main()
-

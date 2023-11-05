@@ -1,0 +1,50 @@
+name: Get spotify audio features
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  get_spotify_features:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8 # Or any version you'd like
+
+      - name: Install dependencies
+        run: |
+          pip install spotipy python-dotenv
+
+      - name: Pull latest changes
+        run: |
+          git pull origin main
+
+      - name: Run spotify data collection
+        env:
+            SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
+            SPOTIFY_SECRET: ${{ secrets.SPOTIFY_SECRET }}
+        run: |
+            python python src/04-data_get_spotify_features.py &
+            SCRIPT_PID=$!
+            sleep 900  # Wait
+            kill $SCRIPT_PID
+
+      - name: Commit files
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add -A
+          git diff-index --quiet HEAD || (git commit -a -m "get spotify data files" --allow-empty)
+
+      - name: Push changes
+        uses: ad-m/github-push-action@v0.6.0
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: main
