@@ -3,7 +3,7 @@ name: Get spotify audio features
 on:
   push:
     branches:
-      - test
+      - main
 
 jobs:
   get_spotify_features:
@@ -34,7 +34,7 @@ jobs:
         run: |
             python src/04-data_get_spotify_features.py &
             SCRIPT_PID=$!
-            sleep 100  # Wait
+            sleep 10800  # Wait
             kill $SCRIPT_PID
 
       - name: Commit files

@@ -30,7 +30,7 @@ jobs:
         run: |
             python src/03-data_get_transcripts.py &
             SCRIPT_PID=$!
-            sleep 120  # Wait
+            sleep 10800  # Wait
             kill $SCRIPT_PID
 
       - name: Commit files
