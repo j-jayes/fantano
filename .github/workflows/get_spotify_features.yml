@@ -3,7 +3,7 @@ name: Get spotify audio features
 on:
   push:
     branches:
-      - main
+      - test
 
 jobs:
   get_spotify_features:
