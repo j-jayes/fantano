@@ -3,7 +3,7 @@ name: Get transcripts
 on:
   push:
     branches:
-      - get_transcripts
+      - main
 
 jobs:
   get_transcripts:

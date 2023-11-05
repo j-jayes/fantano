@@ -3,6 +3,10 @@ import json
 import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import glob
+import dotenv
+
+# Load environment variables
+dotenv.load_dotenv()
 
 # Define paths
 processed_dir = 'data/processed'
@@ -75,5 +79,7 @@ def main():
             else:
                 print(f"No albums found on Spotify for search term: {title}")
 
+
 if __name__ == '__main__':
     main()
+
