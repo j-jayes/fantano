@@ -1,9 +1,8 @@
 name: Get transcripts
 
 on:
-  push:
-    branches:
-      - main
+  schedule:
+    - cron: '0 */2 * * *'  # Run every 2 hours
 
 jobs:
   get_transcripts:
@@ -27,7 +26,11 @@ jobs:
           git pull origin main
 
       - name: Run transcript retrieval script
-        run: python src/03-data_get_transcripts.py
+        run: |
+          python src/03-data_get_transcripts.py &
+          SCRIPT_PID=$!
+          sleep 7200  # Wait for 2 hours
+          kill $SCRIPT_PID
 
       - name: Commit files
         run: |
