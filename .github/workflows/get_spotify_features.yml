@@ -32,7 +32,10 @@ jobs:
             SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
             SPOTIFY_SECRET: ${{ secrets.SPOTIFY_SECRET }}
         run: |
-            python src/04-data_get_spotify_features.py
+            python src/04-data_get_spotify_features.py &
+            SCRIPT_PID=$!
+            sleep 90  # Wait
+            kill $SCRIPT_PID
 
       - name: Commit files
         run: |
