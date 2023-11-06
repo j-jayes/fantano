@@ -28,10 +28,7 @@ jobs:
 
       - name: Run spotify data collection
         run: |
-            python src/03-data_get_transcripts.py &
-            SCRIPT_PID=$!
-            sleep 10800  # Wait
-            kill $SCRIPT_PID
+            python src/03-data_get_transcripts.py 
 
       - name: Commit files
         run: |

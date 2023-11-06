@@ -3,7 +3,7 @@ name: Get spotify audio features
 on:
   push:
     branches:
-      - main
+      - test
 
 jobs:
   get_spotify_features:
@@ -32,10 +32,7 @@ jobs:
             SPOTIFY_CLIENT_ID: ${{ secrets.SPOTIFY_CLIENT_ID }}
             SPOTIFY_SECRET: ${{ secrets.SPOTIFY_SECRET }}
         run: |
-            python src/04-data_get_spotify_features.py &
-            SCRIPT_PID=$!
-            sleep 10800  # Wait
-            kill $SCRIPT_PID
+            python src/04-data_get_spotify_features.py 
 
       - name: Commit files
         run: |
