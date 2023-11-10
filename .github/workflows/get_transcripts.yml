@@ -3,7 +3,7 @@ name: Get fantano transcripts
 on:
   push:
     branches:
-      - main
+      - test
 
 jobs:
   get_transcripts:

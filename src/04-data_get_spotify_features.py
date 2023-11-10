@@ -4,6 +4,8 @@ import spotipy
 from spotipy.oauth2 import SpotifyClientCredentials
 import glob
 import dotenv
+import time
+import glob
 
 # Load environment variables
 dotenv.load_dotenv()
@@ -49,8 +51,15 @@ def get_album_tracks(album_id, artist_id):
 
 
 def main():
+    start_time = time.time()  # Record the start time
+    max_duration = 3 * 60  # 3 hours in seconds
+
     # Loop through all JSON files in processed_dir
     for file_name in glob.glob(f'{processed_dir}/*.json'):
+        if time.time() - start_time > max_duration:
+            print("Time limit exceeded. Stopping the process.")
+            break  # Exit the loop if 3 hours have passed
+
         print(f"Processing file: {file_name}")
         try:
             with open(file_name) as f:
